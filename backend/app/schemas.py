@@ -287,10 +287,10 @@ class WorkOrderPhaseOut(BaseModel):
 class PurchaseCreate(BaseModel):
     purchase_number: Optional[str] = None
     supplier: Optional[str] = None
-    description: str
+    description: Optional[str] = None
     article_number: Optional[str] = None
-    quantity: Decimal = Decimal("1")
-    delivery_week: Optional[str] = None
+    quantity: Optional[Decimal] = Decimal("1")
+    delivery_week: Optional[int] = None
     status: PurchaseStatus = PurchaseStatus.beställd
 
 
@@ -300,7 +300,7 @@ class PurchaseUpdate(BaseModel):
     description: Optional[str] = None
     article_number: Optional[str] = None
     quantity: Optional[Decimal] = None
-    delivery_week: Optional[str] = None
+    delivery_week: Optional[int] = None
     status: Optional[PurchaseStatus] = None
 
 

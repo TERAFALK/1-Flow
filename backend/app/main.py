@@ -14,6 +14,100 @@ from .routers import (
 
 models.Base.metadata.create_all(bind=engine)
 
+# ── Schema migrations (idempotent ALTER TABLE for new columns) ─────────────────
+def _run_migrations():
+    from sqlalchemy import text
+    stmts = [
+        # work_orders – new columns
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS body_text TEXT",
+        # contact_persons
+        """CREATE TABLE IF NOT EXISTS contact_persons (
+            id SERIAL PRIMARY KEY,
+            customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+            name VARCHAR NOT NULL,
+            title VARCHAR,
+            phone VARCHAR,
+            email VARCHAR,
+            is_primary BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        # work_order_phases
+        """CREATE TABLE IF NOT EXISTS work_order_phases (
+            id SERIAL PRIMARY KEY,
+            work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+            name VARCHAR NOT NULL,
+            color VARCHAR DEFAULT '#E2001A',
+            start_date DATE,
+            end_date DATE,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        # purchases – need enum type first
+        "DO $$ BEGIN CREATE TYPE purchasestatus AS ENUM ('beställd','inlevererad','avbeställd'); EXCEPTION WHEN duplicate_object THEN null; END $$",
+        """CREATE TABLE IF NOT EXISTS purchases (
+            id SERIAL PRIMARY KEY,
+            work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+            purchase_number VARCHAR,
+            supplier VARCHAR,
+            description VARCHAR,
+            article_number VARCHAR,
+            quantity NUMERIC,
+            delivery_week INTEGER,
+            status purchasestatus DEFAULT 'beställd',
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        # work_order_files
+        "DO $$ BEGIN CREATE TYPE filetype AS ENUM ('document','photo','drawing'); EXCEPTION WHEN duplicate_object THEN null; END $$",
+        """CREATE TABLE IF NOT EXISTS work_order_files (
+            id SERIAL PRIMARY KEY,
+            work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+            filename VARCHAR NOT NULL,
+            original_name VARCHAR NOT NULL,
+            file_type filetype NOT NULL,
+            mime_type VARCHAR,
+            size_bytes BIGINT,
+            uploaded_at TIMESTAMP DEFAULT NOW(),
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )""",
+        # activities
+        "DO $$ BEGIN CREATE TYPE activitytype AS ENUM ('samtal','händelse','anteckning'); EXCEPTION WHEN duplicate_object THEN null; END $$",
+        """CREATE TABLE IF NOT EXISTS activities (
+            id SERIAL PRIMARY KEY,
+            work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+            activity_type activitytype NOT NULL DEFAULT 'anteckning',
+            description TEXT NOT NULL,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        # tasks
+        """CREATE TABLE IF NOT EXISTS tasks (
+            id SERIAL PRIMARY KEY,
+            work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+            title VARCHAR NOT NULL,
+            description TEXT,
+            assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            due_date DATE,
+            completed BOOLEAN DEFAULT FALSE,
+            completed_at TIMESTAMP,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        # settings
+        """CREATE TABLE IF NOT EXISTS settings (
+            key VARCHAR PRIMARY KEY,
+            value VARCHAR NOT NULL
+        )""",
+    ]
+    with engine.connect() as conn:
+        for stmt in stmts:
+            try:
+                conn.execute(text(stmt))
+            except Exception as e:
+                print(f"Migration warning: {e}")
+        conn.commit()
+
+_run_migrations()
+
 app = FastAPI(title="Flow - Verkstadsystem", version="1.0.0")
 
 app.add_middleware(

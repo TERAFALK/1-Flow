@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.9"
 
 services:
   db:
@@ -10,34 +10,50 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flowpass}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flow}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
 
   backend:
     build: ./backend
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-flow}:${POSTGRES_PASSWORD:-flowpass}@db:5432/${POSTGRES_DB:-flow}
       SECRET_KEY: ${SECRET_KEY:-super-secret-key-change-in-production}
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-admin@flow.local}
       FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:-admin}
       FIRST_ADMIN_NAME: ${FIRST_ADMIN_NAME:-Administratör}
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
-      - uploads:/uploads
+      - uploads:/app/uploads
+    expose:
+      - "8000"
+    networks:
+      - internal
+      - npm_proxy
 
   frontend:
     build: ./frontend
     restart: unless-stopped
-    ports:
-      - "${PORT:-80}:80"
     depends_on:
       - backend
+    expose:
+      - "80"
+    networks:
+      - internal
+      - npm_proxy
+
+networks:
+  internal:
+    driver: bridge
+  npm_proxy:
+    external: true
 
 volumes:
   postgres_data:

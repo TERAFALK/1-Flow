@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey,
-    Numeric, Text, Boolean, Enum
+    Numeric, Text, Boolean, Enum, BigInteger
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -36,6 +36,24 @@ class StockTransactionType(str, PyEnum):
     justering = "justering"
 
 
+class PurchaseStatus(str, PyEnum):
+    beställd = "beställd"
+    inlevererad = "inlevererad"
+    avbeställd = "avbeställd"
+
+
+class FileType(str, PyEnum):
+    document = "document"
+    photo = "photo"
+    drawing = "drawing"
+
+
+class ActivityType(str, PyEnum):
+    samtal = "samtal"
+    händelse = "händelse"
+    anteckning = "anteckning"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -52,6 +70,7 @@ class User(Base):
         "WorkOrder", back_populates="assigned_to_user",
         foreign_keys="WorkOrder.assigned_to"
     )
+    tasks = relationship("Task", back_populates="assigned_user", foreign_keys="Task.assigned_to")
 
 
 class Customer(Base):
@@ -70,6 +89,22 @@ class Customer(Base):
 
     vehicles = relationship("Vehicle", back_populates="customer")
     work_orders = relationship("WorkOrder", back_populates="customer")
+    contacts = relationship("ContactPerson", back_populates="customer", cascade="all, delete-orphan")
+
+
+class ContactPerson(Base):
+    __tablename__ = "contact_persons"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    name = Column(String, nullable=False)
+    title = Column(String)
+    phone = Column(String)
+    email = Column(String)
+    is_primary = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    customer = relationship("Customer", back_populates="contacts")
 
 
 class Vehicle(Base):
@@ -100,6 +135,7 @@ class WorkOrder(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"))
     description = Column(Text, nullable=False)
+    body_text = Column(Text)
     status = Column(Enum(WorkOrderStatus), default=WorkOrderStatus.ny, nullable=False)
     assigned_to = Column(Integer, ForeignKey("users.id"))
     scheduled_date = Column(DateTime)
@@ -124,6 +160,108 @@ class WorkOrder(Base):
         "TimeEntry", back_populates="work_order",
         cascade="all, delete-orphan", order_by="TimeEntry.start_time"
     )
+    phases = relationship(
+        "WorkOrderPhase", back_populates="work_order",
+        cascade="all, delete-orphan", order_by="WorkOrderPhase.sort_order"
+    )
+    purchases = relationship(
+        "Purchase", back_populates="work_order",
+        cascade="all, delete-orphan", order_by="Purchase.id"
+    )
+    files = relationship(
+        "WorkOrderFile", back_populates="work_order",
+        cascade="all, delete-orphan", order_by="WorkOrderFile.uploaded_at"
+    )
+    activities = relationship(
+        "Activity", back_populates="work_order",
+        cascade="all, delete-orphan", order_by="Activity.created_at.desc()"
+    )
+    tasks = relationship(
+        "Task", back_populates="work_order",
+        cascade="all, delete-orphan", order_by="Task.id"
+    )
+
+
+class WorkOrderPhase(Base):
+    __tablename__ = "work_order_phases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
+    name = Column(String, nullable=False)
+    color = Column(String, default="#E2001A")
+    start_date = Column(DateTime)
+    end_date = Column(DateTime)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    work_order = relationship("WorkOrder", back_populates="phases")
+
+
+class Purchase(Base):
+    __tablename__ = "purchases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
+    purchase_number = Column(String)
+    supplier = Column(String)
+    description = Column(String, nullable=False)
+    article_number = Column(String)
+    quantity = Column(Numeric(10, 2), default=1)
+    delivery_week = Column(String)
+    status = Column(Enum(PurchaseStatus), default=PurchaseStatus.beställd)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    work_order = relationship("WorkOrder", back_populates="purchases")
+
+
+class WorkOrderFile(Base):
+    __tablename__ = "work_order_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    original_name = Column(String, nullable=False)
+    file_type = Column(Enum(FileType), nullable=False)
+    mime_type = Column(String)
+    size_bytes = Column(BigInteger, default=0)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_by = Column(Integer, ForeignKey("users.id"))
+
+    work_order = relationship("WorkOrder", back_populates="files")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+class Activity(Base):
+    __tablename__ = "activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
+    activity_type = Column(Enum(ActivityType), default=ActivityType.anteckning, nullable=False)
+    description = Column(Text, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    work_order = relationship("WorkOrder", back_populates="activities")
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    assigned_to = Column(Integer, ForeignKey("users.id"))
+    due_date = Column(DateTime)
+    completed = Column(Boolean, default=False)
+    completed_at = Column(DateTime)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    work_order = relationship("WorkOrder", back_populates="tasks")
+    assigned_user = relationship("User", back_populates="tasks", foreign_keys=[assigned_to])
+    creator = relationship("User", foreign_keys=[created_by])
 
 
 class Article(Base):
@@ -191,3 +329,10 @@ class StockTransaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     article = relationship("Article", back_populates="stock_transactions")
+
+
+class Settings(Base):
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)

@@ -11,6 +11,8 @@ const STATUS_FLOW = {
   fakturerad:  { next: null,        label: null },
 };
 
+// ── List ──────────────────────────────────────────────────────────────────────
+
 export async function renderWorkOrders(el, params = {}) {
   el.innerHTML = `
     <div class="page-header">
@@ -87,13 +89,17 @@ export async function renderWorkOrders(el, params = {}) {
   await reload();
 }
 
+// ── New ───────────────────────────────────────────────────────────────────────
+
 export async function renderNewWorkOrder(el, params = {}) {
-  const [customers, vehicles, users] = await Promise.all([
+  const [customers, vehicles, users, settings] = await Promise.all([
     api.get('/customers'),
     api.get('/vehicles'),
     api.get('/users'),
+    api.get('/settings').catch(() => []),
   ]);
 
+  const orderMode = (settings.find?.(s => s.key === 'order_number_mode') || {}).value || 'auto';
   const preCustomer = params.customer ? parseInt(params.customer) : '';
   const preVehicle = params.vehicle ? parseInt(params.vehicle) : '';
 
@@ -107,6 +113,12 @@ export async function renderNewWorkOrder(el, params = {}) {
     <div class="card" style="max-width:700px">
       <div class="card-body">
         <form id="wo-form">
+          ${orderMode === 'manual' ? `
+            <div class="field">
+              <label>Ordernummer *</label>
+              <input type="text" name="order_number" required placeholder="t.ex. AO-2025-0042">
+            </div>
+          ` : ''}
           <div class="form-row">
             <div class="field">
               <label>Kund *</label>
@@ -147,7 +159,6 @@ export async function renderNewWorkOrder(el, params = {}) {
     </div>
   `;
 
-  // Filter vehicles by selected customer
   const custSel = document.getElementById('wo-customer');
   const vehSel = document.getElementById('wo-vehicle');
   custSel.addEventListener('change', () => {
@@ -168,6 +179,7 @@ export async function renderNewWorkOrder(el, params = {}) {
     body.assigned_to = body.assigned_to ? Number(body.assigned_to) : null;
     if (!body.scheduled_date) body.scheduled_date = null;
     if (!body.internal_notes) body.internal_notes = null;
+    if (!body.order_number) delete body.order_number;
     try {
       const wo = await api.post('/work-orders', body);
       showToast(`${wo.order_number} skapad`, 'success');
@@ -175,6 +187,8 @@ export async function renderNewWorkOrder(el, params = {}) {
     } catch (err) { showToast(err.message, 'error'); }
   });
 }
+
+// ── Detail ────────────────────────────────────────────────────────────────────
 
 export async function renderWorkOrderDetail(el, id) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
@@ -193,7 +207,7 @@ async function loadDetail(el, id) {
   const totalMins = wo.time_entries.filter(e => e.end_time).reduce((s, e) => s + (e.duration_minutes || 0), 0);
 
   el.innerHTML = `
-    <div class="page-header">
+    <div class="page-header" style="margin-bottom:12px">
       <a href="#/work-orders" class="btn btn-ghost btn-sm">← Tillbaka</a>
     </div>
 
@@ -204,11 +218,7 @@ async function loadDetail(el, id) {
         <div style="margin-top:8px">${statusBadge(wo.status)}</div>
       </div>
       <div class="order-actions">
-        ${flow?.next ? `
-          <button class="btn btn-primary" onclick="window._advanceStatus('${wo.id}','${flow.next}')">
-            ${flow.label}
-          </button>
-        ` : ''}
+        ${flow?.next ? `<button class="btn btn-primary" onclick="window._advanceStatus('${wo.id}','${flow.next}')">${flow.label}</button>` : ''}
         <button class="btn btn-secondary" onclick="window._editWO(${wo.id})">Redigera</button>
         <a href="#/scanner?order=${wo.id}" class="btn btn-secondary">
           <svg viewBox="0 0 20 20" fill="currentColor" width="15"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 010 2H4v2a1 1 0 01-2 0V5a1 1 0 011-1zm9 0a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-2 0V4h-2a1 1 0 01-1-1zM3 16a1 1 0 011 1h2v-2a1 1 0 112 0v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3a1 1 0 011-1zm13 0a1 1 0 00-1 1v2h-2a1 1 0 100 2h3a1 1 0 001-1v-3a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
@@ -246,16 +256,35 @@ async function loadDetail(el, id) {
     </div>
 
     ${wo.internal_notes ? `
-      <div class="alert alert-info" style="margin-bottom:20px">
+      <div class="alert alert-info" style="margin-bottom:16px">
         <strong>Interna anteckningar:</strong> ${wo.internal_notes}
       </div>
     ` : ''}
 
-    <div class="tabs">
-      <div class="tab active" data-tab="parts">Reservdelar (${wo.lines.length})</div>
-      <div class="tab" data-tab="time">Tid (${fmtDuration(totalMins)})</div>
+    <!-- body_text always visible -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <span class="card-title">Arbetstext</span>
+        <span class="text-muted" style="font-size:12px" id="body-save-status"></span>
+      </div>
+      <div class="card-body" style="padding-top:0">
+        <textarea id="body-text-area" rows="5" placeholder="Beskriv arbetet i detalj, noteringar, teknisk information…" style="width:100%;resize:vertical">${wo.body_text || ''}</textarea>
+      </div>
     </div>
 
+    <div class="tabs" id="wo-tabs">
+      <div class="tab active" data-tab="parts">Delar (${wo.lines.length})</div>
+      <div class="tab" data-tab="time">Tid (${fmtDuration(totalMins)})</div>
+      <div class="tab" data-tab="phases">Faser</div>
+      <div class="tab" data-tab="purchases">Inköp</div>
+      <div class="tab" data-tab="documents">Dokument</div>
+      <div class="tab" data-tab="photos">Foton</div>
+      <div class="tab" data-tab="drawings">Ritningar</div>
+      <div class="tab" data-tab="activities">Aktiviteter</div>
+      <div class="tab" data-tab="tasks">Uppgifter</div>
+    </div>
+
+    <!-- DELAR -->
     <div id="tab-parts">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn btn-secondary" id="add-line-btn">
@@ -275,19 +304,18 @@ async function loadDetail(el, id) {
               ${wo.lines.map(l => lineRow(l)).join('') || '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px">Inga reservdelar</td></tr>'}
             </tbody>
             ${wo.lines.length ? `
-              <tfoot>
-                <tr class="total-row">
-                  <td colspan="5">Summa reservdelar</td>
-                  <td class="text-right">${fmtPrice(totalParts)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
+              <tfoot><tr class="total-row">
+                <td colspan="5">Summa reservdelar</td>
+                <td class="text-right">${fmtPrice(totalParts)}</td>
+                <td></td>
+              </tr></tfoot>
             ` : ''}
           </table>
         </div>
       </div>
     </div>
 
+    <!-- TID -->
     <div id="tab-time" class="hidden">
       <div id="timer-section" style="margin-bottom:16px"></div>
       <div class="card">
@@ -312,37 +340,136 @@ async function loadDetail(el, id) {
               `).join('') || '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">Inga tidposter</td></tr>'}
             </tbody>
             ${wo.time_entries.filter(e=>e.end_time).length ? `
-              <tfoot>
-                <tr class="total-row">
-                  <td colspan="4">Total tid</td>
-                  <td class="text-right">${fmtDuration(totalMins)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
+              <tfoot><tr class="total-row">
+                <td colspan="4">Total tid</td>
+                <td class="text-right">${fmtDuration(totalMins)}</td>
+                <td></td>
+              </tr></tfoot>
             ` : ''}
           </table>
         </div>
       </div>
     </div>
+
+    <!-- FASER -->
+    <div id="tab-phases" class="hidden">
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-secondary" id="add-phase-btn">+ Ny fas</button>
+      </div>
+      <div id="phases-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- INKÖP -->
+    <div id="tab-purchases" class="hidden">
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-secondary" id="add-purchase-btn">+ Nytt inköp</button>
+      </div>
+      <div id="purchases-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- DOKUMENT -->
+    <div id="tab-documents" class="hidden">
+      <div id="documents-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- FOTON -->
+    <div id="tab-photos" class="hidden">
+      <div id="photos-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- RITNINGAR -->
+    <div id="tab-drawings" class="hidden">
+      <div id="drawings-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- AKTIVITETER -->
+    <div id="tab-activities" class="hidden">
+      <div id="activities-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- UPPGIFTER -->
+    <div id="tab-tasks" class="hidden">
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-secondary" id="add-task-btn">+ Ny uppgift</button>
+      </div>
+      <div id="tasks-content"><div class="loading">Laddar…</div></div>
+    </div>
+
+    <!-- Image viewer overlay -->
+    <div id="img-viewer" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;align-items:center;justify-content:center;cursor:zoom-out" onclick="this.style.display='none'">
+      <img id="img-viewer-img" style="max-width:92vw;max-height:92vh;object-fit:contain;border-radius:4px">
+    </div>
   `;
 
-  // Tabs
-  el.querySelectorAll('.tab').forEach(t => {
-    t.addEventListener('click', () => {
-      el.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      el.querySelectorAll('[id^="tab-"]').forEach(x => x.classList.add('hidden'));
-      document.getElementById(`tab-${t.dataset.tab}`).classList.remove('hidden');
+  // ── Tab switching ───────────────────────────────────────────────────────────
+  const ALL_TABS = ['parts','time','phases','purchases','documents','photos','drawings','activities','tasks'];
+  const tabLoadedMap = {};
+
+  document.getElementById('wo-tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    const name = tab.dataset.tab;
+    document.querySelectorAll('#wo-tabs .tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    ALL_TABS.forEach(t => {
+      document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== name);
     });
+    if (!tabLoadedMap[name]) {
+      tabLoadedMap[name] = true;
+      loadTab(name);
+    }
   });
 
-  // Timer section
+  function loadTab(name) {
+    if (name === 'phases')     loadPhases(id);
+    if (name === 'purchases')  loadPurchases(id, users);
+    if (name === 'documents')  loadFiles(id, 'document');
+    if (name === 'photos')     loadFiles(id, 'photo');
+    if (name === 'drawings')   loadFiles(id, 'drawing');
+    if (name === 'activities') loadActivities(id);
+    if (name === 'tasks')      loadTasks(id, users);
+  }
+
+  // ── body_text auto-save ─────────────────────────────────────────────────────
+  const bodyArea = document.getElementById('body-text-area');
+  const saveStatus = document.getElementById('body-save-status');
+  let bodyTimer;
+  bodyArea.addEventListener('input', () => {
+    saveStatus.textContent = 'Osparad…';
+    clearTimeout(bodyTimer);
+    bodyTimer = setTimeout(async () => {
+      try {
+        await api.put(`/work-orders/${id}`, { body_text: bodyArea.value });
+        saveStatus.textContent = 'Sparad';
+        setTimeout(() => { saveStatus.textContent = ''; }, 2000);
+      } catch { saveStatus.textContent = 'Fel vid sparning'; }
+    }, 1200);
+  });
+
+  // ── Timer section ───────────────────────────────────────────────────────────
   loadTimerSection(id);
 
-  // Add line
-  document.getElementById('add-line-btn').addEventListener('click', () => openAddLineForm(wo.id, articles, () => loadDetail(el, id)));
+  // ── Add line ────────────────────────────────────────────────────────────────
+  document.getElementById('add-line-btn').addEventListener('click', () =>
+    openAddLineForm(wo.id, articles, () => loadDetail(el, id))
+  );
 
-  // Handlers
+  // ── Phase button ────────────────────────────────────────────────────────────
+  document.getElementById('add-phase-btn').addEventListener('click', () =>
+    openPhaseForm(id, null, () => loadPhases(id))
+  );
+
+  // ── Purchase button ─────────────────────────────────────────────────────────
+  document.getElementById('add-purchase-btn').addEventListener('click', () =>
+    openPurchaseForm(id, null, users, () => loadPurchases(id, users))
+  );
+
+  // ── Task button ─────────────────────────────────────────────────────────────
+  document.getElementById('add-task-btn').addEventListener('click', () =>
+    openTaskForm(id, null, users, () => loadTasks(id, users))
+  );
+
+  // ── Global handlers ─────────────────────────────────────────────────────────
   window._advanceStatus = async (orderId, nextStatus) => {
     await api.put(`/work-orders/${orderId}`, { status: nextStatus });
     showToast('Status uppdaterad', 'success');
@@ -397,6 +524,8 @@ async function loadDetail(el, id) {
   };
 }
 
+// ── Timer section ─────────────────────────────────────────────────────────────
+
 async function loadTimerSection(orderId) {
   const section = document.getElementById('timer-section');
   if (!section) return;
@@ -433,9 +562,7 @@ async function loadTimerSection(orderId) {
                 <option value="provkörning">Provkörning</option>
               </select>
             </div>
-            <button type="submit" class="btn btn-success" style="margin-bottom:16px">
-              ▶ Starta tidmätning
-            </button>
+            <button type="submit" class="btn btn-success" style="margin-bottom:16px">▶ Starta tidmätning</button>
           </form>
         </div>
       </div>
@@ -451,6 +578,558 @@ async function loadTimerSection(orderId) {
     });
   }
 }
+
+// ── Phases / Gantt ────────────────────────────────────────────────────────────
+
+async function loadPhases(orderId) {
+  const el = document.getElementById('phases-content');
+  if (!el) return;
+  const phases = await api.get(`/work-orders/${orderId}/phases`).catch(() => []);
+
+  if (!phases.length) {
+    el.innerHTML = `<div class="empty-state"><p>Inga faser tillagda än</p></div>`;
+    return;
+  }
+
+  const dates = phases.flatMap(p => [p.start_date, p.end_date]).filter(Boolean).map(d => new Date(d));
+  const minDate = dates.length ? new Date(Math.min(...dates)) : new Date();
+  const maxDate = dates.length ? new Date(Math.max(...dates)) : new Date();
+  const today = new Date();
+  const rangeMs = Math.max(maxDate - minDate, 1000*60*60*24*7);
+
+  function pct(dateStr) {
+    if (!dateStr) return 0;
+    return Math.min(100, Math.max(0, ((new Date(dateStr) - minDate) / rangeMs) * 100));
+  }
+  function barWidth(start, end) {
+    if (!start || !end) return 10;
+    return Math.min(100 - pct(start), Math.max(2, ((new Date(end) - new Date(start)) / rangeMs) * 100));
+  }
+  const todayPct = Math.min(100, Math.max(0, ((today - minDate) / rangeMs) * 100));
+  const fmtShort = (d) => d ? new Date(d).toLocaleDateString('sv-SE', { month:'short', day:'numeric' }) : '–';
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><span class="card-title">Gantt-schema</span></div>
+      <div class="card-body" style="overflow-x:auto">
+        <div class="gantt-wrap" style="min-width:500px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:8px;padding:0 4px">
+            <span>${fmtShort(minDate.toISOString())}</span>
+            <span>Idag</span>
+            <span>${fmtShort(maxDate.toISOString())}</span>
+          </div>
+          <div style="position:relative">
+            <div class="gantt-today" style="left:${todayPct}%"></div>
+            ${phases.map(p => `
+              <div class="gantt-row">
+                <div class="gantt-label">${p.name}</div>
+                <div class="gantt-track">
+                  <div class="gantt-bar" style="margin-left:${pct(p.start_date)}%;width:${barWidth(p.start_date,p.end_date)}%;background:${p.color || 'var(--accent)'}">
+                    <span>${fmtShort(p.start_date)} – ${fmtShort(p.end_date)}</span>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fas</th><th>Färg</th><th>Start</th><th>Slut</th><th></th></tr></thead>
+          <tbody>
+            ${phases.map(p => `
+              <tr>
+                <td><strong>${p.name}</strong></td>
+                <td><span style="display:inline-block;width:16px;height:16px;border-radius:4px;background:${p.color || 'var(--accent)'}"></span></td>
+                <td>${p.start_date ? fmtDate(p.start_date) : '–'}</td>
+                <td>${p.end_date ? fmtDate(p.end_date) : '–'}</td>
+                <td>
+                  <div style="display:flex;gap:4px">
+                    <button class="btn-icon" onclick="window._editPhase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button class="btn-icon" onclick="window._deletePhase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  window._editPhase = async (oid, pid) => {
+    const phase = await api.get(`/work-orders/${oid}/phases`).then(list => list.find(p => p.id === pid));
+    openPhaseForm(oid, phase, () => loadPhases(oid));
+  };
+  window._deletePhase = async (oid, pid) => {
+    if (await confirmDialog('Ta bort fas?')) {
+      await api.delete(`/work-orders/${oid}/phases/${pid}`);
+      loadPhases(oid);
+    }
+  };
+}
+
+function openPhaseForm(orderId, phase, onSaved) {
+  openModal({
+    title: phase ? 'Redigera fas' : 'Ny fas',
+    body: `
+      <form id="phase-form">
+        <div class="field"><label>Fas-namn *</label><input type="text" name="name" value="${phase?.name || ''}" required placeholder="t.ex. Demontering"></div>
+        <div class="form-row">
+          <div class="field"><label>Startdatum</label><input type="date" name="start_date" value="${phase?.start_date?.slice(0,10) || ''}"></div>
+          <div class="field"><label>Slutdatum</label><input type="date" name="end_date" value="${phase?.end_date?.slice(0,10) || ''}"></div>
+        </div>
+        <div class="field"><label>Färg</label><input type="color" name="color" value="${phase?.color || '#E2001A'}" style="height:36px;padding:2px 4px"></div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">${phase ? 'Spara' : 'Skapa'}</button>
+        </div>
+      </form>
+    `,
+  });
+  document.getElementById('phase-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    if (!body.start_date) body.start_date = null;
+    if (!body.end_date) body.end_date = null;
+    try {
+      if (phase) await api.put(`/work-orders/${orderId}/phases/${phase.id}`, body);
+      else await api.post(`/work-orders/${orderId}/phases`, body);
+      showToast('Fas sparad', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+// ── Purchases ─────────────────────────────────────────────────────────────────
+
+const PURCHASE_STATUS = { beställd: 'Beställd', inlevererad: 'Inlevererad', avbeställd: 'Avbeställd' };
+
+async function loadPurchases(orderId, users) {
+  const el = document.getElementById('purchases-content');
+  if (!el) return;
+  const purchases = await api.get(`/work-orders/${orderId}/purchases`).catch(() => []);
+
+  if (!purchases.length) {
+    el.innerHTML = `<div class="empty-state"><p>Inga inköp registrerade</p></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Inköpsnr</th><th>Leverantör</th><th>Benämning</th>
+            <th>Art.nr</th><th class="text-right">Antal</th>
+            <th>Lev.vecka</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${purchases.map(p => `
+              <tr>
+                <td class="font-mono">${p.purchase_number || '–'}</td>
+                <td>${p.supplier || '–'}</td>
+                <td>${p.description || '–'}</td>
+                <td class="font-mono text-muted">${p.article_number || '–'}</td>
+                <td class="text-right">${p.quantity ?? '–'}</td>
+                <td>${p.delivery_week ? 'v.' + p.delivery_week : '–'}</td>
+                <td>
+                  <select class="purchase-status-sel" data-id="${p.id}" style="font-size:12px;padding:3px 6px">
+                    ${Object.entries(PURCHASE_STATUS).map(([k,v]) => `<option value="${k}" ${p.status===k?'selected':''}>${v}</option>`).join('')}
+                  </select>
+                </td>
+                <td>
+                  <div style="display:flex;gap:4px">
+                    <button class="btn-icon" onclick="window._editPurchase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button class="btn-icon" onclick="window._deletePurchase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  el.querySelectorAll('.purchase-status-sel').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      try {
+        await api.put(`/work-orders/${orderId}/purchases/${sel.dataset.id}`, { status: sel.value });
+        showToast('Status uppdaterad', 'success');
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+
+  window._editPurchase = async (oid, pid) => {
+    const purchase = await api.get(`/work-orders/${oid}/purchases`).then(list => list.find(p => p.id === pid));
+    openPurchaseForm(oid, purchase, users, () => loadPurchases(oid, users));
+  };
+  window._deletePurchase = async (oid, pid) => {
+    if (await confirmDialog('Ta bort inköp?')) {
+      await api.delete(`/work-orders/${oid}/purchases/${pid}`);
+      loadPurchases(oid, users);
+    }
+  };
+}
+
+async function openPurchaseForm(orderId, purchase, users, onSaved) {
+  const settings = await api.get('/settings').catch(() => []);
+  const mode = (settings.find?.(s => s.key === 'purchase_number_mode') || {}).value || 'auto';
+
+  openModal({
+    title: purchase ? 'Redigera inköp' : 'Nytt inköp',
+    size: 'modal-lg',
+    body: `
+      <form id="purchase-form">
+        ${mode === 'manual' ? `
+          <div class="field"><label>Inköpsnummer *</label><input type="text" name="purchase_number" value="${purchase?.purchase_number || ''}" required placeholder="t.ex. INK-2025-0001"></div>
+        ` : ''}
+        <div class="form-row">
+          <div class="field"><label>Leverantör</label><input type="text" name="supplier" value="${purchase?.supplier || ''}" placeholder="Leverantörens namn"></div>
+          <div class="field"><label>Artikelnummer</label><input type="text" name="article_number" value="${purchase?.article_number || ''}"></div>
+        </div>
+        <div class="field"><label>Benämning</label><input type="text" name="description" value="${purchase?.description || ''}" placeholder="Vad beställs?"></div>
+        <div class="form-row">
+          <div class="field"><label>Antal</label><input type="number" name="quantity" value="${purchase?.quantity ?? 1}" step="0.01" min="0"></div>
+          <div class="field"><label>Leveransvecka</label><input type="number" name="delivery_week" value="${purchase?.delivery_week || ''}" min="1" max="53" placeholder="t.ex. 42"></div>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select name="status">
+            ${Object.entries(PURCHASE_STATUS).map(([k,v]) => `<option value="${k}" ${(purchase?.status||'beställd')===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">${purchase ? 'Spara' : 'Skapa'}</button>
+        </div>
+      </form>
+    `,
+  });
+  document.getElementById('purchase-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    if (body.quantity) body.quantity = parseFloat(body.quantity);
+    if (body.delivery_week) body.delivery_week = parseInt(body.delivery_week);
+    else delete body.delivery_week;
+    if (!body.purchase_number) delete body.purchase_number;
+    try {
+      if (purchase) await api.put(`/work-orders/${orderId}/purchases/${purchase.id}`, body);
+      else await api.post(`/work-orders/${orderId}/purchases`, body);
+      showToast('Inköp sparat', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+// ── Files (documents, photos, drawings) ──────────────────────────────────────
+
+const FILE_ACCEPT = {
+  document: '.pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt',
+  photo:    '.jpg,.jpeg,.png,.gif,.webp,.bmp',
+  drawing:  '.pdf,.dwg,.dxf,.svg',
+};
+
+async function loadFiles(orderId, fileType) {
+  const containerId = fileType === 'photo' ? 'photos' : fileType === 'drawing' ? 'drawings' : 'documents';
+  const el = document.getElementById(`${containerId}-content`);
+  if (!el) return;
+
+  const files = await api.get(`/work-orders/${orderId}/files?file_type=${fileType}`).catch(() => []);
+  const isPhoto = fileType === 'photo';
+
+  el.innerHTML = `
+    <div class="upload-area" id="upload-area-${fileType}" style="margin-bottom:16px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="32" height="32" style="opacity:.4"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <p style="margin:8px 0 4px">Dra och släpp filer hit, eller</p>
+      <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+        Välj fil
+        <input type="file" id="file-input-${fileType}" accept="${FILE_ACCEPT[fileType]}" multiple style="display:none">
+      </label>
+    </div>
+
+    ${isPhoto ? `
+      <div class="photo-grid" id="filelist-${fileType}">
+        ${files.map(f => `
+          <div class="photo-thumb">
+            <img src="/api/work-orders/${orderId}/files/${f.id}/download" loading="lazy" onclick="window._viewPhoto('/api/work-orders/${orderId}/files/${f.id}/download')" style="cursor:zoom-in">
+            <button class="photo-delete" onclick="window._deleteFile(${orderId}, ${f.id}, '${fileType}')" title="Ta bort">×</button>
+            <div class="photo-name">${f.original_name}</div>
+          </div>
+        `).join('') || '<p style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:24px">Inga foton uppladdade</p>'}
+      </div>
+    ` : `
+      <div class="card" id="filelist-${fileType}">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Filnamn</th><th>Storlek</th><th>Uppladdad</th><th></th></tr></thead>
+            <tbody>
+              ${files.map(f => `
+                <tr>
+                  <td>
+                    <a href="/api/work-orders/${orderId}/files/${f.id}/download" download="${f.original_name}" style="color:var(--accent)">
+                      ${fileIcon(f.original_name)} ${f.original_name}
+                    </a>
+                  </td>
+                  <td class="text-muted">${fmtBytes(f.size_bytes)}</td>
+                  <td class="text-muted">${fmtDate(f.uploaded_at)}</td>
+                  <td>
+                    <button class="btn-icon" onclick="window._deleteFile(${orderId}, ${f.id}, '${fileType}')">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    </button>
+                  </td>
+                </tr>
+              `).join('') || `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--text-3)">Inga filer uppladdade</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `}
+  `;
+
+  const uploadArea = document.getElementById(`upload-area-${fileType}`);
+  const fileInput = document.getElementById(`file-input-${fileType}`);
+
+  uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+  uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+  uploadArea.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove('drag-over');
+    await uploadFiles(orderId, fileType, Array.from(e.dataTransfer.files));
+  });
+  fileInput.addEventListener('change', async () => {
+    await uploadFiles(orderId, fileType, Array.from(fileInput.files));
+    fileInput.value = '';
+  });
+
+  window._deleteFile = async (oid, fid, ft) => {
+    if (await confirmDialog('Ta bort filen?')) {
+      await api.delete(`/work-orders/${oid}/files/${fid}`);
+      loadFiles(oid, ft);
+    }
+  };
+  window._viewPhoto = (src) => {
+    const viewer = document.getElementById('img-viewer');
+    if (!viewer) return;
+    document.getElementById('img-viewer-img').src = src;
+    viewer.style.display = 'flex';
+  };
+}
+
+async function uploadFiles(orderId, fileType, files) {
+  const token = localStorage.getItem('flow_token');
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const resp = await fetch(`/api/work-orders/${orderId}/files?file_type=${fileType}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || 'Uppladdning misslyckades');
+      }
+      showToast(`${file.name} uppladdad`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+  loadFiles(orderId, fileType);
+}
+
+function fileIcon(name) {
+  const ext = (name || '').split('.').pop().toLowerCase();
+  if (ext === 'pdf') return '📄';
+  if (['doc','docx'].includes(ext)) return '📝';
+  if (['xls','xlsx','ods'].includes(ext)) return '📊';
+  if (['dwg','dxf'].includes(ext)) return '📐';
+  return '📎';
+}
+
+function fmtBytes(b) {
+  if (!b) return '–';
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/(1024*1024)).toFixed(1) + ' MB';
+}
+
+// ── Activities ────────────────────────────────────────────────────────────────
+
+const ACTIVITY_TYPES = { samtal: 'Samtal', händelse: 'Händelse', anteckning: 'Anteckning' };
+
+async function loadActivities(orderId) {
+  const el = document.getElementById('activities-content');
+  if (!el) return;
+  const activities = await api.get(`/work-orders/${orderId}/activities`).catch(() => []);
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><span class="card-title">Ny aktivitet</span></div>
+      <div class="card-body">
+        <form id="activity-form" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div class="field" style="margin:0;min-width:140px">
+            <label>Typ</label>
+            <select name="activity_type">
+              ${Object.entries(ACTIVITY_TYPES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="margin:0;flex:1;min-width:200px">
+            <label>Beskrivning *</label>
+            <input type="text" name="description" required placeholder="Vad hände?">
+          </div>
+          <button type="submit" class="btn btn-primary" style="margin-bottom:16px">Registrera</button>
+        </form>
+      </div>
+    </div>
+
+    ${activities.length ? `
+      <div class="timeline">
+        ${activities.map(a => `
+          <div class="timeline-item">
+            <div class="timeline-dot timeline-dot-${a.activity_type}"></div>
+            <div class="timeline-content">
+              <div class="timeline-header">
+                <strong>${ACTIVITY_TYPES[a.activity_type] || a.activity_type}</strong>
+                <span class="text-muted" style="font-size:12px">${fmtDate(a.created_at, true)}</span>
+                ${a.creator ? `<span class="text-muted" style="font-size:12px">• ${a.creator.full_name}</span>` : ''}
+                <button class="btn-icon" style="margin-left:auto" onclick="window._deleteActivity(${orderId}, ${a.id})">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                </button>
+              </div>
+              <p style="margin:4px 0 0;color:var(--text-1)">${a.description}</p>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : '<div class="empty-state"><p>Inga aktiviteter registrerade</p></div>'}
+  `;
+
+  document.getElementById('activity-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    try {
+      await api.post(`/work-orders/${orderId}/activities`, body);
+      showToast('Aktivitet registrerad', 'success');
+      loadActivities(orderId);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  window._deleteActivity = async (oid, aid) => {
+    if (await confirmDialog('Ta bort aktivitet?')) {
+      await api.delete(`/work-orders/${oid}/activities/${aid}`);
+      loadActivities(oid);
+    }
+  };
+}
+
+// ── Tasks ─────────────────────────────────────────────────────────────────────
+
+async function loadTasks(orderId, users) {
+  const el = document.getElementById('tasks-content');
+  if (!el) return;
+  const tasks = await api.get(`/work-orders/${orderId}/tasks`).catch(() => []);
+
+  if (!tasks.length) {
+    el.innerHTML = `<div class="empty-state"><p>Inga uppgifter</p></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${tasks.map(t => `
+          <div class="task-item ${t.completed ? 'task-done' : ''}">
+            <button class="task-check ${t.completed ? 'done' : ''}" onclick="window._toggleTask(${orderId}, ${t.id}, ${!t.completed})">
+              ${t.completed ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
+            </button>
+            <div style="flex:1">
+              <div class="task-title ${t.completed ? 'done' : ''}">${t.title}</div>
+              ${t.description ? `<div style="font-size:13px;color:var(--text-2);margin-top:2px">${t.description}</div>` : ''}
+              <div style="display:flex;gap:12px;margin-top:4px;font-size:12px;color:var(--text-3)">
+                ${t.assigned_user ? `<span>👤 ${t.assigned_user.full_name}</span>` : ''}
+                ${t.due_date ? `<span>📅 ${fmtDate(t.due_date)}</span>` : ''}
+                ${t.completed && t.completed_at ? `<span>Klar ${fmtDate(t.completed_at, true)}</span>` : ''}
+              </div>
+            </div>
+            <button class="btn-icon" onclick="window._deleteTask(${orderId}, ${t.id})">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  window._toggleTask = async (oid, tid, completed) => {
+    await api.put(`/work-orders/${oid}/tasks/${tid}`, { completed });
+    loadTasks(oid, users);
+  };
+  window._deleteTask = async (oid, tid) => {
+    if (await confirmDialog('Ta bort uppgift?')) {
+      await api.delete(`/work-orders/${oid}/tasks/${tid}`);
+      loadTasks(oid, users);
+    }
+  };
+}
+
+function openTaskForm(orderId, task, users, onSaved) {
+  openModal({
+    title: task ? 'Redigera uppgift' : 'Ny uppgift',
+    body: `
+      <form id="task-form">
+        <div class="field"><label>Titel *</label><input type="text" name="title" value="${task?.title || ''}" required placeholder="Vad ska göras?"></div>
+        <div class="field"><label>Beskrivning</label><textarea name="description" rows="2">${task?.description || ''}</textarea></div>
+        <div class="form-row">
+          <div class="field">
+            <label>Tilldelad</label>
+            <select name="assigned_to">
+              <option value="">Ingen</option>
+              ${users.map(u => `<option value="${u.id}" ${task?.assigned_to==u.id?'selected':''}>${u.full_name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Förfallodatum</label><input type="date" name="due_date" value="${task?.due_date?.slice(0,10) || ''}"></div>
+        </div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">${task ? 'Spara' : 'Skapa'}</button>
+        </div>
+      </form>
+    `,
+  });
+  document.getElementById('task-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    if (body.assigned_to) body.assigned_to = Number(body.assigned_to);
+    else delete body.assigned_to;
+    if (!body.due_date) delete body.due_date;
+    if (!body.description) delete body.description;
+    try {
+      if (task) await api.put(`/work-orders/${orderId}/tasks/${task.id}`, body);
+      else await api.post(`/work-orders/${orderId}/tasks`, body);
+      showToast('Uppgift sparad', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 function lineRow(l) {
   const total = parseFloat(l.quantity) * parseFloat(l.unit_price);

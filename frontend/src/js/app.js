@@ -9,6 +9,7 @@ import { renderScanner } from './pages/scanner.js';
 import { renderTimeEntries } from './pages/time-entries.js';
 import { renderCalendar } from './pages/calendar.js';
 import { renderUsers } from './pages/users.js';
+import { renderSettings } from './pages/settings.js';
 
 // ── Helpers (exported for page modules) ──────────────────────────────────────
 
@@ -53,12 +54,17 @@ const PAGE_TITLES = {
   '/time-entries': 'Tidrapportering',
   '/calendar':     'Kalender',
   '/users':        'Användare',
+  '/settings':     'Inställningar',
 };
 
 async function route() {
   const { path, params } = parseHash();
   const content = document.getElementById('page-content');
   content.innerHTML = '<div class="loading">Laddar…</div>';
+
+  // Clear topbar actions on each route
+  const topbarActions = document.getElementById('topbar-actions');
+  if (topbarActions) topbarActions.innerHTML = '';
 
   // Update topbar title
   const titleEl = document.getElementById('topbar-title');
@@ -96,6 +102,7 @@ async function route() {
       '/time-entries':  renderTimeEntries,
       '/calendar':      renderCalendar,
       '/users':         renderUsers,
+      '/settings':      renderSettings,
     };
 
     const fn = map[path] || map['/dashboard'];

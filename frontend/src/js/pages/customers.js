@@ -1,24 +1,23 @@
 import { api } from '../api.js';
-import { fmtDate } from '../app.js';
+import { fmtDate, statusBadge } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 
 export async function renderCustomers(el) {
+  const topbarActions = document.getElementById('topbar-actions');
+  if (topbarActions) topbarActions.innerHTML = `
+    <button class="btn btn-primary btn-sm" id="new-customer-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Ny kund
+    </button>`;
+
   el.innerHTML = `
-    <div class="page-header">
-      <div>
-        <div class="page-title">Kunder</div>
-        <div class="page-subtitle">Kundregister</div>
-      </div>
-      <button class="btn btn-primary" id="new-customer-btn">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
-        Ny kund
-      </button>
-    </div>
+    <div class="page-title" style="margin-bottom:4px">Kunder</div>
+    <div class="page-subtitle" style="margin-bottom:20px">Kundregister</div>
     <div class="card">
       <div class="card-header">
         <div class="search-wrap">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="search" id="customer-search" placeholder="Sök kund…">
         </div>
       </div>
@@ -26,7 +25,7 @@ export async function renderCustomers(el) {
     </div>
   `;
 
-  document.getElementById('new-customer-btn').addEventListener('click', () => openCustomerForm(null, reload));
+  document.getElementById('new-customer-btn')?.addEventListener('click', () => openCustomerForm(null, reload));
 
   let searchTimer;
   document.getElementById('customer-search').addEventListener('input', (e) => {
@@ -48,19 +47,19 @@ export async function renderCustomers(el) {
           <thead><tr><th>Namn</th><th>Org.nr</th><th>Telefon</th><th>E-post</th><th>Ort</th><th></th></tr></thead>
           <tbody>
             ${customers.map(c => `
-              <tr>
-                <td><strong><a href="#/customers/${c.id}">${c.name}</a></strong></td>
+              <tr class="clickable" onclick="location.hash='#/customers/${c.id}'">
+                <td><strong>${c.name}</strong></td>
                 <td>${c.org_number || '–'}</td>
                 <td>${c.phone || '–'}</td>
                 <td>${c.email || '–'}</td>
                 <td>${c.city || '–'}</td>
-                <td>
+                <td onclick="event.stopPropagation()">
                   <div class="flex gap-2">
                     <button class="btn-icon" title="Redigera" onclick="window._editCustomer(${c.id})">
-                      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     </button>
                     <button class="btn-icon" title="Ta bort" onclick="window._deleteCustomer(${c.id}, '${c.name.replace(/'/g, "\\'")}')">
-                      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
                     </button>
                   </div>
                 </td>
@@ -91,64 +90,117 @@ export async function renderCustomers(el) {
 
 export async function renderCustomerDetail(el, id) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
-  const c = await api.get(`/customers/${id}`);
-  const vehicles = await api.get(`/vehicles?customer_id=${id}`);
-  const orders = await api.get(`/work-orders?q=${encodeURIComponent(c.name)}`).catch(() => []);
+
+  const topbarActions = document.getElementById('topbar-actions');
+  if (topbarActions) topbarActions.innerHTML = `
+    <a href="#/customers" class="btn btn-secondary btn-sm">← Tillbaka</a>
+    <button class="btn btn-secondary btn-sm" id="topbar-edit-btn">Redigera</button>
+    <a href="#/work-orders/new?customer=${id}" class="btn btn-primary btn-sm">Ny arbetsorder</a>`;
+
+  const [c, vehicles, contacts, orders] = await Promise.all([
+    api.get(`/customers/${id}`),
+    api.get(`/vehicles?customer_id=${id}`),
+    api.get(`/customers/${id}/contacts`),
+    api.get(`/work-orders?q=`).then(all => all.filter(o => o.customer_id == id)).catch(() => []),
+  ]);
+
+  document.getElementById('topbar-title') && (document.getElementById('topbar-title').textContent = c.name);
+  document.getElementById('topbar-edit-btn')?.addEventListener('click', () =>
+    openCustomerForm(c, () => renderCustomerDetail(el, id))
+  );
 
   el.innerHTML = `
-    <div class="page-header">
-      <div>
-        <a href="#/customers" class="btn btn-ghost btn-sm" style="margin-bottom:8px">← Tillbaka</a>
-        <div class="page-title">${c.name}</div>
-        <div class="page-subtitle">${c.org_number || ''}</div>
-      </div>
-      <div class="flex gap-2">
-        <button class="btn btn-secondary" onclick="window._editCustomer2(${c.id})">Redigera</button>
-        <a href="#/work-orders/new?customer=${c.id}" class="btn btn-primary">Ny arbetsorder</a>
-      </div>
+    <div style="margin-bottom:20px">
+      <div class="page-title">${c.name}</div>
+      ${c.org_number ? `<div class="page-subtitle">Org.nr: ${c.org_number}</div>` : ''}
     </div>
-    <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start">
-      <div>
-        <div class="card" style="margin-bottom:16px">
+
+    <div class="tabs" id="customer-tabs">
+      <div class="tab active" data-tab="info">Info</div>
+      <div class="tab" data-tab="contacts">Kontaktpersoner <span style="font-size:11px;opacity:.6">(${contacts.length})</span></div>
+      <div class="tab" data-tab="vehicles">Fordon <span style="font-size:11px;opacity:.6">(${vehicles.length})</span></div>
+      <div class="tab" data-tab="history">Historik <span style="font-size:11px;opacity:.6">(${orders.length})</span></div>
+    </div>
+
+    <div id="tab-info">
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:16px">
+        <div class="card">
           <div class="card-header"><span class="card-title">Kontaktuppgifter</span></div>
           <div class="card-body">
-            ${row('Telefon', c.phone)} ${row('E-post', c.email)}
-            ${row('Adress', c.address)} ${row('Ort', `${c.postal_code || ''} ${c.city || ''}`.trim())}
-            ${c.notes ? `<hr class="divider"><p class="text-small text-muted">${c.notes}</p>` : ''}
+            ${metaRow('Telefon', c.phone)}
+            ${metaRow('E-post', c.email)}
+            ${metaRow('Adress', c.address)}
+            ${metaRow('Postnummer', c.postal_code)}
+            ${metaRow('Ort', c.city)}
+            ${c.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2)">${c.notes}</p>` : ''}
           </div>
         </div>
         <div class="card">
-          <div class="card-header">
-            <span class="card-title">Fordon (${vehicles.length})</span>
-            <a href="#/vehicles/new?customer=${c.id}" class="btn btn-ghost btn-sm">+ Lägg till</a>
-          </div>
-          <div class="card-body" style="padding:0">
-            ${vehicles.length ? vehicles.map(v => `
-              <a href="#/vehicles/${v.id}" style="display:block;padding:12px 16px;border-bottom:1px solid var(--border-light)">
-                <strong>${v.license_plate}</strong>
-                <span class="text-muted text-small"> ${v.make || ''} ${v.model || ''} ${v.year || ''}</span>
-              </a>
-            `).join('') : '<p class="text-muted text-small" style="padding:16px">Inga fordon registrerade</p>'}
+          <div class="card-header"><span class="card-title">Primär kontaktperson</span></div>
+          <div class="card-body">
+            ${contacts.filter(c => c.is_primary).map(ct => `
+              <div><strong>${ct.name}</strong>${ct.title ? ` · ${ct.title}` : ''}</div>
+              ${ct.phone ? `<div style="font-size:13px;color:var(--text-2)">${ct.phone}</div>` : ''}
+              ${ct.email ? `<div style="font-size:13px;color:var(--text-2)">${ct.email}</div>` : ''}
+            `).join('') || '<p style="color:var(--text-3);font-size:13px">Ingen primär kontakt angiven</p>'}
           </div>
         </div>
       </div>
+    </div>
+
+    <div id="tab-contacts" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Kontaktpersoner</span>
+          <button class="btn btn-primary btn-sm" id="add-contact-btn">+ Lägg till</button>
+        </div>
+        <div id="contacts-body">
+          ${renderContactsTable(contacts)}
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-vehicles" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Kopplade fordon</span>
+          <a href="#/vehicles/new?customer=${id}" class="btn btn-primary btn-sm">+ Lägg till fordon</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Reg.nr</th><th>Märke</th><th>Modell</th><th>År</th><th>Mätarställning</th></tr></thead>
+            <tbody>
+              ${vehicles.length ? vehicles.map(v => `
+                <tr class="clickable" onclick="location.hash='#/vehicles/${v.id}'">
+                  <td><strong>${v.license_plate}</strong></td>
+                  <td>${v.make || '–'}</td>
+                  <td>${v.model || '–'}</td>
+                  <td>${v.year || '–'}</td>
+                  <td>${v.odometer ? v.odometer.toLocaleString('sv-SE') + ' km' : '–'}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3)">Inga fordon registrerade</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-history" class="hidden">
       <div class="card">
         <div class="card-header"><span class="card-title">Arbetsorder-historik</span></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Order</th><th>Fordon</th><th>Beskrivning</th><th>Status</th><th>Datum</th></tr></thead>
             <tbody>
-              ${orders.filter(o => o.customer_id == id).length
-                ? orders.filter(o => o.customer_id == id).map(o => `
-                  <tr class="clickable" onclick="location.hash='#/work-orders/${o.id}'">
-                    <td><strong>${o.order_number}</strong></td>
-                    <td>${o.vehicle?.license_plate || '–'}</td>
-                    <td>${o.description}</td>
-                    <td><span class="badge badge-${o.status}">${statusLabel(o.status)}</span></td>
-                    <td class="text-muted">${fmtDate(o.created_at)}</td>
-                  </tr>
-                `).join('')
-                : '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:24px">Inga arbetsorder</td></tr>'}
+              ${orders.length ? orders.map(o => `
+                <tr class="clickable" onclick="location.hash='#/work-orders/${o.id}'">
+                  <td><strong>${o.order_number}</strong></td>
+                  <td>${o.vehicle?.license_plate || '–'}</td>
+                  <td>${o.description}</td>
+                  <td>${statusBadge(o.status)}</td>
+                  <td class="text-muted">${fmtDate(o.created_at)}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text-3)">Inga arbetsorder</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -156,22 +208,141 @@ export async function renderCustomerDetail(el, id) {
     </div>
   `;
 
-  window._editCustomer2 = async (id) => {
-    const c = await api.get(`/customers/${id}`);
-    openCustomerForm(c, () => renderCustomerDetail(el, id));
-  };
+  // Tab switching
+  document.getElementById('customer-tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    document.querySelectorAll('#customer-tabs .tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    ['info', 'contacts', 'vehicles', 'history'].forEach(name => {
+      document.getElementById(`tab-${name}`).classList.toggle('hidden', name !== tab.dataset.tab);
+    });
+  });
+
+  // Contacts tab actions
+  document.getElementById('add-contact-btn')?.addEventListener('click', () =>
+    openContactForm(id, null, async () => {
+      const updated = await api.get(`/customers/${id}/contacts`);
+      document.getElementById('contacts-body').innerHTML = renderContactsTable(updated);
+      bindContactActions(id);
+    })
+  );
+  bindContactActions(id);
 }
 
-function row(label, value) {
+function renderContactsTable(contacts) {
+  if (!contacts.length) return '<div class="empty-state" style="padding:32px"><p>Inga kontaktpersoner</p></div>';
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Namn</th><th>Titel</th><th>Telefon</th><th>E-post</th><th>Primär</th><th></th></tr></thead>
+        <tbody>
+          ${contacts.map(ct => `
+            <tr>
+              <td><strong>${ct.name}</strong></td>
+              <td>${ct.title || '–'}</td>
+              <td>${ct.phone || '–'}</td>
+              <td>${ct.email || '–'}</td>
+              <td>${ct.is_primary ? '<span class="badge badge-klar">Primär</span>' : ''}</td>
+              <td>
+                <div class="flex gap-2">
+                  <button class="btn-icon" data-edit-contact="${ct.id}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button class="btn-icon" data-del-contact="${ct.id}" data-customer-id="${ct.customer_id}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function bindContactActions(customerId) {
+  document.querySelectorAll('[data-edit-contact]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const contacts = await api.get(`/customers/${customerId}/contacts`);
+      const ct = contacts.find(c => c.id == btn.dataset.editContact);
+      if (ct) openContactForm(customerId, ct, async () => {
+        const updated = await api.get(`/customers/${customerId}/contacts`);
+        document.getElementById('contacts-body').innerHTML = renderContactsTable(updated);
+        bindContactActions(customerId);
+      });
+    });
+  });
+  document.querySelectorAll('[data-del-contact]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!await confirmDialog('Ta bort kontaktpersonen?')) return;
+      await api.delete(`/customers/${customerId}/contacts/${btn.dataset.delContact}`);
+      showToast('Kontaktperson borttagen', 'success');
+      const updated = await api.get(`/customers/${customerId}/contacts`);
+      document.getElementById('contacts-body').innerHTML = renderContactsTable(updated);
+      bindContactActions(customerId);
+    });
+  });
+}
+
+function openContactForm(customerId, contact, onSaved) {
+  openModal({
+    title: contact ? 'Redigera kontaktperson' : 'Ny kontaktperson',
+    body: `
+      <form id="contact-form">
+        <div class="form-row">
+          <div class="field"><label>Namn *</label><input type="text" name="name" value="${contact?.name || ''}" required></div>
+          <div class="field"><label>Titel</label><input type="text" name="title" value="${contact?.title || ''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Telefon</label><input type="text" name="phone" value="${contact?.phone || ''}"></div>
+          <div class="field"><label>E-post</label><input type="email" name="email" value="${contact?.email || ''}"></div>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" name="is_primary" ${contact?.is_primary ? 'checked' : ''}> Primär kontaktperson
+          </label>
+        </div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">${contact ? 'Spara' : 'Lägg till'}</button>
+        </div>
+      </form>
+    `,
+  });
+
+  document.getElementById('contact-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      name: fd.get('name'),
+      title: fd.get('title') || null,
+      phone: fd.get('phone') || null,
+      email: fd.get('email') || null,
+      is_primary: fd.get('is_primary') === 'on',
+    };
+    try {
+      if (contact) {
+        await api.put(`/customers/${customerId}/contacts/${contact.id}`, body);
+        showToast('Kontaktperson uppdaterad', 'success');
+      } else {
+        await api.post(`/customers/${customerId}/contacts`, body);
+        showToast('Kontaktperson skapad', 'success');
+      }
+      closeModal();
+      onSaved?.();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+}
+
+function metaRow(label, value) {
   if (!value) return '';
   return `<div class="meta-row"><span class="meta-label">${label}:</span><span>${value}</span></div>`;
 }
 
-function statusLabel(s) {
-  return { ny: 'Ny', planerad: 'Planerad', pagaende: 'Pågående', klar: 'Klar', fakturerad: 'Fakturerad' }[s] || s;
-}
-
-function openCustomerForm(customer, onSaved) {
+export function openCustomerForm(customer, onSaved) {
   openModal({
     title: customer ? 'Redigera kund' : 'Ny kund',
     size: 'modal-lg',

@@ -11,7 +11,7 @@ from ..schemas import (
 )
 from ..models import (
     WorkOrder, WorkOrderLine, WorkOrderStatus, Article, StockTransaction,
-    StockTransactionType, User, Customer, Vehicle, TimeEntry,
+    StockTransactionType, User, Customer, Vehicle, TimeEntry, Settings,
 )
 
 router = APIRouter(prefix="/api/work-orders", tags=["work-orders"])
@@ -89,11 +89,23 @@ def create_work_order(
         raise HTTPException(status_code=404, detail="Kund ej hittad")
     if body.vehicle_id and not db.get(Vehicle, body.vehicle_id):
         raise HTTPException(status_code=404, detail="Fordon ej hittad")
-    wo = WorkOrder(
-        order_number=_next_order_number(db),
-        created_by=current_user.id,
-        **body.model_dump(),
-    )
+
+    data = body.model_dump()
+    provided_number = data.pop("order_number", None)
+    mode_setting = db.get(Settings, "order_number_mode")
+    mode = mode_setting.value if mode_setting else "auto"
+
+    if mode == "manual":
+        if not provided_number:
+            raise HTTPException(400, "Ordernummer krävs (manuellt läge aktiverat i inställningar)")
+        order_number = provided_number
+    else:
+        order_number = provided_number or _next_order_number(db)
+
+    if db.query(WorkOrder).filter(WorkOrder.order_number == order_number).first():
+        raise HTTPException(400, f"Ordernummer {order_number} används redan")
+
+    wo = WorkOrder(order_number=order_number, created_by=current_user.id, **data)
     db.add(wo)
     db.commit()
     return _get_wo(db, wo.id)

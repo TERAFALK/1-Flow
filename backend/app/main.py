@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 from .database import engine, get_db
 from . import models
 from .auth import hash_password
-from .routers import auth, users, customers, vehicles, articles, work_orders, time_entries, dashboard
+from .routers import (
+    auth, users, customers, vehicles, articles,
+    work_orders, time_entries, dashboard,
+    settings, contacts, phases, purchases, files, activities, tasks,
+)
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -23,11 +27,18 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(customers.router)
+app.include_router(contacts.router)
 app.include_router(vehicles.router)
 app.include_router(articles.router)
 app.include_router(work_orders.router)
+app.include_router(phases.router)
+app.include_router(purchases.router)
+app.include_router(files.router)
+app.include_router(activities.router)
+app.include_router(tasks.router)
 app.include_router(time_entries.router)
 app.include_router(dashboard.router)
+app.include_router(settings.router)
 
 
 @app.on_event("startup")

@@ -1,11 +1,14 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, EmailStr
-from .models import UserRole, WorkOrderStatus, TimeEntryType, StockTransactionType
+from pydantic import BaseModel, ConfigDict
+from .models import (
+    UserRole, WorkOrderStatus, TimeEntryType, StockTransactionType,
+    PurchaseStatus, FileType, ActivityType,
+)
 
 
-# ── Auth ─────────────────────────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
     email: str
@@ -37,7 +40,6 @@ class UserUpdate(BaseModel):
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     email: str
     full_name: str
@@ -65,7 +67,6 @@ class CustomerUpdate(CustomerCreate):
 
 class CustomerOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     name: str
     org_number: Optional[str]
@@ -75,6 +76,36 @@ class CustomerOut(BaseModel):
     city: Optional[str]
     postal_code: Optional[str]
     notes: Optional[str]
+    created_at: datetime
+
+
+# ── Contact Persons ───────────────────────────────────────────────────────────
+
+class ContactPersonCreate(BaseModel):
+    name: str
+    title: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    is_primary: bool = False
+
+
+class ContactPersonUpdate(BaseModel):
+    name: Optional[str] = None
+    title: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    is_primary: Optional[bool] = None
+
+
+class ContactPersonOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    customer_id: int
+    name: str
+    title: Optional[str]
+    phone: Optional[str]
+    email: Optional[str]
+    is_primary: bool
     created_at: datetime
 
 
@@ -108,7 +139,6 @@ class VehicleUpdate(BaseModel):
 
 class VehicleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     customer_id: int
     license_plate: str
@@ -152,7 +182,6 @@ class ArticleUpdate(BaseModel):
 
 class ArticleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     article_number: Optional[str]
     barcode: Optional[str]
@@ -185,7 +214,6 @@ class WorkOrderLineUpdate(BaseModel):
 
 class WorkOrderLineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     work_order_id: int
     article_id: Optional[int]
@@ -212,7 +240,6 @@ class TimeEntryStop(BaseModel):
 
 class TimeEntryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     work_order_id: int
     user_id: int
@@ -225,12 +252,145 @@ class TimeEntryOut(BaseModel):
     user: Optional[UserOut] = None
 
 
+# ── Work Order Phases (Gantt) ─────────────────────────────────────────────────
+
+class WorkOrderPhaseCreate(BaseModel):
+    name: str
+    color: str = "#E2001A"
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    sort_order: int = 0
+
+
+class WorkOrderPhaseUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    sort_order: Optional[int] = None
+
+
+class WorkOrderPhaseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    work_order_id: int
+    name: str
+    color: str
+    start_date: Optional[datetime]
+    end_date: Optional[datetime]
+    sort_order: int
+    created_at: datetime
+
+
+# ── Purchases ─────────────────────────────────────────────────────────────────
+
+class PurchaseCreate(BaseModel):
+    purchase_number: Optional[str] = None
+    supplier: Optional[str] = None
+    description: str
+    article_number: Optional[str] = None
+    quantity: Decimal = Decimal("1")
+    delivery_week: Optional[str] = None
+    status: PurchaseStatus = PurchaseStatus.beställd
+
+
+class PurchaseUpdate(BaseModel):
+    purchase_number: Optional[str] = None
+    supplier: Optional[str] = None
+    description: Optional[str] = None
+    article_number: Optional[str] = None
+    quantity: Optional[Decimal] = None
+    delivery_week: Optional[str] = None
+    status: Optional[PurchaseStatus] = None
+
+
+class PurchaseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    work_order_id: int
+    purchase_number: Optional[str]
+    supplier: Optional[str]
+    description: str
+    article_number: Optional[str]
+    quantity: Decimal
+    delivery_week: Optional[str]
+    status: PurchaseStatus
+    created_at: datetime
+
+
+# ── Files ─────────────────────────────────────────────────────────────────────
+
+class WorkOrderFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    work_order_id: int
+    filename: str
+    original_name: str
+    file_type: FileType
+    mime_type: Optional[str]
+    size_bytes: int
+    uploaded_at: datetime
+    uploaded_by: Optional[int]
+    uploader: Optional[UserOut] = None
+
+
+# ── Activities ────────────────────────────────────────────────────────────────
+
+class ActivityCreate(BaseModel):
+    activity_type: ActivityType = ActivityType.anteckning
+    description: str
+
+
+class ActivityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    work_order_id: int
+    activity_type: ActivityType
+    description: str
+    created_by: Optional[int]
+    created_at: datetime
+    creator: Optional[UserOut] = None
+
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    assigned_to: Optional[int] = None
+    due_date: Optional[datetime] = None
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    assigned_to: Optional[int] = None
+    due_date: Optional[datetime] = None
+    completed: Optional[bool] = None
+
+
+class TaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    work_order_id: int
+    title: str
+    description: Optional[str]
+    assigned_to: Optional[int]
+    due_date: Optional[datetime]
+    completed: bool
+    completed_at: Optional[datetime]
+    created_by: Optional[int]
+    created_at: datetime
+    assigned_user: Optional[UserOut] = None
+
+
 # ── Work Orders ───────────────────────────────────────────────────────────────
 
 class WorkOrderCreate(BaseModel):
     customer_id: int
     vehicle_id: Optional[int] = None
     description: str
+    order_number: Optional[str] = None
     assigned_to: Optional[int] = None
     scheduled_date: Optional[datetime] = None
     internal_notes: Optional[str] = None
@@ -240,6 +400,7 @@ class WorkOrderUpdate(BaseModel):
     customer_id: Optional[int] = None
     vehicle_id: Optional[int] = None
     description: Optional[str] = None
+    body_text: Optional[str] = None
     status: Optional[WorkOrderStatus] = None
     assigned_to: Optional[int] = None
     scheduled_date: Optional[datetime] = None
@@ -248,12 +409,12 @@ class WorkOrderUpdate(BaseModel):
 
 class WorkOrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     order_number: str
     customer_id: int
     vehicle_id: Optional[int]
     description: str
+    body_text: Optional[str]
     status: WorkOrderStatus
     assigned_to: Optional[int]
     scheduled_date: Optional[datetime]
@@ -270,7 +431,6 @@ class WorkOrderOut(BaseModel):
 
 class WorkOrderListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     order_number: str
     customer_id: int
@@ -300,7 +460,6 @@ class ScanResult(BaseModel):
 
 class StockTransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     article_id: int
     quantity: Decimal
@@ -308,6 +467,18 @@ class StockTransactionOut(BaseModel):
     work_order_id: Optional[int]
     notes: Optional[str]
     created_at: datetime
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+class SettingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    key: str
+    value: str
+
+
+class SettingUpdate(BaseModel):
+    value: str
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────

@@ -112,10 +112,10 @@ export async function renderArticles(el) {
                 <td>${a.location || '–'}</td>
                 <td>
                   <div class="flex gap-2">
-                    <button class="btn-icon" title="Redigera" onclick="window._editArticle(${a.id})">
+                    <button type="button" class="btn-icon" title="Redigera" data-edit="${a.id}">
                       <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
                     </button>
-                    <button class="btn-icon" title="Ta bort" onclick="window._deleteArticle(${a.id})">
+                    <button type="button" class="btn-icon" title="Ta bort" data-delete="${a.id}">
                       <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                     </button>
                   </div>
@@ -135,21 +135,27 @@ export async function renderArticles(el) {
 
   function reload() { loadPage(true); }
 
-  window._editArticle = async (id) => {
-    const a = await api.get(`/articles/${id}`);
-    openArticleForm(a, reload);
-  };
-  window._deleteArticle = async (id) => {
-    const a = allRows.find(x => x.id === id);
-    const name = (a?.name || 'artikeln').replace(/</g, '&lt;');
-    if (await confirmDialog(`Ta bort artikeln <strong>${name}</strong>?`)) {
-      try {
-        await api.delete(`/articles/${id}`);
-        showToast('Artikel borttagen', 'success');
-        reload();
-      } catch (err) { showToast(err.message, 'error'); }
+  // Event-delegering istället för inline onclick – överlever omrenderingar
+  // och fungerar även med strikt CSP
+  document.getElementById('article-list').addEventListener('click', async (e) => {
+    const editBtn = e.target.closest('[data-edit]');
+    const delBtn = e.target.closest('[data-delete]');
+    if (editBtn) {
+      const a = await api.get(`/articles/${editBtn.dataset.edit}`);
+      openArticleForm(a, reload);
+    } else if (delBtn) {
+      const id = parseInt(delBtn.dataset.delete);
+      const a = allRows.find(x => x.id === id);
+      const name = (a?.name || 'artikeln').replace(/</g, '&lt;');
+      if (await confirmDialog(`Ta bort artikeln <strong>${name}</strong>?`)) {
+        try {
+          await api.delete(`/articles/${id}`);
+          showToast('Artikel borttagen', 'success');
+          reload();
+        } catch (err) { showToast(err.message, 'error'); }
+      }
     }
-  };
+  });
 
   await loadPage(true);
 }
@@ -171,13 +177,14 @@ function openArticleForm(article, onSaved) {
           <div class="field"><label>Plats i lager</label><input type="text" name="location" value="${article?.location || ''}" placeholder="t.ex. A1-03"></div>
         </div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
-          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="button" class="btn btn-secondary" id="article-form-cancel">Avbryt</button>
           <button type="submit" class="btn btn-primary">${article ? 'Spara' : 'Skapa artikel'}</button>
         </div>
       </form>
     `,
   });
 
+  document.getElementById('article-form-cancel').addEventListener('click', () => closeModal());
   document.getElementById('article-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target));

@@ -24,6 +24,9 @@ export async function renderCalendar(el) {
     let cells = '';
     let day = 1 - startDow;
     for (let row = 0; row < 6; row++) {
+      const weekMondayDay = day;
+      const weekMonday = new Date(year, month - 1, weekMondayDay);
+      cells += `<div class="cal-week-num">${isoWeekNumber(weekMonday)}</div>`;
       for (let col = 0; col < 7; col++, day++) {
         const isOther = day < 1 || day > daysInMonth;
         const isToday = !isOther && day === today.getDate() && month === today.getMonth() + 1 && year === today.getFullYear();
@@ -32,7 +35,7 @@ export async function renderCalendar(el) {
           <div class="cal-day ${isOther ? 'other-month' : ''} ${isToday ? 'today' : ''}">
             <div class="cal-day-num">${isOther ? '' : day}</div>
             ${dayOrders.map(o => `
-              <div class="cal-event ${o.status}" title="${o.order_number} – ${o.customer?.name || ''}" onclick="location.hash='#/work-orders/${o.id}'">
+              <div class="cal-event ${o.status}" title="${o.order_number} – ${o.customer?.name || ''} – ${o.scheduled_date ? new Date(o.scheduled_date + 'Z').toLocaleDateString('sv-SE') : ''}" onclick="location.hash='#/work-orders/${o.id}'">
                 ${o.order_number} ${o.vehicle?.license_plate || ''}
               </div>
             `).join('')}
@@ -54,6 +57,7 @@ export async function renderCalendar(el) {
         </div>
       </div>
       <div class="cal-grid">
+        <div class="cal-week-num" style="font-size:9px">v.</div>
         ${dayNames.map(d => `<div class="cal-head">${d}</div>`).join('')}
         ${cells}
       </div>
@@ -78,4 +82,12 @@ export async function renderCalendar(el) {
 
   el.innerHTML = '<div class="loading">Laddar kalender…</div>';
   await draw();
+}
+
+function isoWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }

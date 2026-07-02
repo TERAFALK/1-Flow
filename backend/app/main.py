@@ -10,6 +10,7 @@ from .routers import (
     auth, users, customers, vehicles, articles,
     work_orders, time_entries, dashboard,
     settings, contacts, phases, purchases, files, activities, tasks,
+    pick_lists,
 )
 
 models.Base.metadata.create_all(bind=engine)
@@ -97,6 +98,24 @@ def _run_migrations():
             key VARCHAR PRIMARY KEY,
             value VARCHAR NOT NULL
         )""",
+        # pick lists
+        """CREATE TABLE IF NOT EXISTS pick_lists (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR NOT NULL,
+            notes TEXT,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS pick_list_lines (
+            id SERIAL PRIMARY KEY,
+            pick_list_id INTEGER NOT NULL REFERENCES pick_lists(id) ON DELETE CASCADE,
+            article_id INTEGER REFERENCES articles(id) ON DELETE SET NULL,
+            description VARCHAR NOT NULL,
+            quantity NUMERIC DEFAULT 1,
+            unit VARCHAR DEFAULT 'st',
+            location VARCHAR,
+            picked BOOLEAN DEFAULT FALSE
+        )""",
     ]
     with engine.connect() as conn:
         for stmt in stmts:
@@ -133,6 +152,7 @@ app.include_router(tasks.router)
 app.include_router(time_entries.router)
 app.include_router(dashboard.router)
 app.include_router(settings.router)
+app.include_router(pick_lists.router)
 
 
 @app.on_event("startup")
@@ -149,6 +169,39 @@ def create_first_admin():
             db.add(admin)
             db.commit()
             print(f"Admin-användare skapad: {admin.email}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def import_articles_from_csv():
+    import csv
+    csv_path = os.path.join(os.path.dirname(__file__), "data", "articles_import.csv")
+    if not os.path.exists(csv_path):
+        return
+    db: Session = next(get_db())
+    try:
+        if db.query(models.Article).count() > 0:
+            return
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            batch = []
+            for row in reader:
+                batch.append(models.Article(
+                    article_number=row["article_number"] or None,
+                    name=row["name"] or "Okänd artikel",
+                    price=row["price"] or 0,
+                    stock_quantity=row["stock_quantity"] or 0,
+                    location=row["location"] or None,
+                ))
+                if len(batch) >= 1000:
+                    db.bulk_save_objects(batch)
+                    db.commit()
+                    batch = []
+            if batch:
+                db.bulk_save_objects(batch)
+                db.commit()
+        print("Artiklar importerade från articles_import.csv")
     finally:
         db.close()
 

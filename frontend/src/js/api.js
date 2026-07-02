@@ -31,3 +31,20 @@ export const api = {
   patch:  (url, body)  => request(url, { method: 'PATCH',  body: JSON.stringify(body) }),
   delete: (url)        => request(url, { method: 'DELETE' }),
 };
+
+export async function downloadFile(url, filename) {
+  const token = localStorage.getItem('flow_token');
+  const res = await fetch(`${BASE}${url}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objUrl);
+}

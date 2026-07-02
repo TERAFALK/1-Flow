@@ -67,7 +67,7 @@ export async function renderWorkOrders(el, params = {}) {
           <thead><tr>
             <th>Order</th><th>Kund</th><th>Fordon</th>
             <th>Beskrivning</th><th>Tilldelad</th>
-            <th>Schemalagd</th><th>Status</th>
+            <th>Schemalagd</th><th>Status</th><th></th>
           </tr></thead>
           <tbody>
             ${orders.map(o => `
@@ -79,6 +79,11 @@ export async function renderWorkOrders(el, params = {}) {
                 <td>${o.assigned_to_user?.full_name || '–'}</td>
                 <td class="text-muted">${o.scheduled_date ? fmtDate(o.scheduled_date) : '–'}</td>
                 <td>${statusBadge(o.status)}</td>
+                <td onclick="event.stopPropagation()">
+                  <button class="btn-icon" title="Ta bort order" onclick="window._deleteWOFromList(${o.id})">
+                    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                  </button>
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -86,6 +91,13 @@ export async function renderWorkOrders(el, params = {}) {
       </div>
     `;
   }
+  window._deleteWOFromList = async (orderId) => {
+    if (await confirmDialog('Ta bort denna arbetsorder permanent?')) {
+      await api.delete(`/work-orders/${orderId}`);
+      showToast('Arbetsorder borttagen', 'success');
+      reload();
+    }
+  };
   await reload();
 }
 
@@ -633,18 +645,31 @@ async function loadOverviewGantt(orderId) {
   const todayPct = Math.min(100, Math.max(0, ((today - minDate) / rangeMs) * 100));
   const fmtShort = (d) => d ? new Date(d).toLocaleDateString('sv-SE', { month:'short', day:'numeric' }) : '–';
 
+  // Week-boundary gridlines with ISO week numbers
+  const weekTicks = [];
+  const firstMonday = new Date(minDate);
+  const dow = firstMonday.getDay() === 0 ? 7 : firstMonday.getDay();
+  firstMonday.setDate(firstMonday.getDate() - (dow - 1));
+  for (let d = new Date(firstMonday); d <= maxDate; d.setDate(d.getDate() + 7)) {
+    weekTicks.push({ week: isoWeekNumber(d), left: pct(d.toISOString()) });
+  }
+
   container.innerHTML = `
     <div class="card">
       <div class="card-header"><span class="card-title">Gantt-schema</span></div>
       <div class="card-body" style="overflow-x:auto">
-        <div class="gantt-wrap" style="min-width:500px">
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:8px;padding:0 4px">
+        <div class="gantt-wrap" style="min-width:600px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:4px;padding:0 4px">
             <span>${fmtShort(minDate.toISOString())}</span>
-            <span>Idag</span>
+            <span>Idag: ${fmtShort(today.toISOString())}</span>
             <span>${fmtShort(maxDate.toISOString())}</span>
           </div>
           <div style="position:relative">
-            <div class="gantt-today" style="left:${todayPct}%"></div>
+            <div class="gantt-week-header">
+              ${weekTicks.map(w => `<span class="gantt-week-tick" style="left:${w.left}%">v.${w.week}</span>`).join('')}
+            </div>
+            <div class="gantt-today" style="left:${todayPct}%" title="Idag"></div>
+            ${weekTicks.map(w => `<div class="gantt-week-line" style="left:${w.left}%"></div>`).join('')}
             ${phases.map(p => `
               <div class="gantt-row">
                 <div class="gantt-label">${p.name}</div>
@@ -660,6 +685,14 @@ async function loadOverviewGantt(orderId) {
       </div>
     </div>
   `;
+}
+
+function isoWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
 // ── Manual time entry form ────────────────────────────────────────────────────

@@ -499,4 +499,73 @@ class DashboardStats(BaseModel):
     recent_orders: List[WorkOrderListItem]
 
 
+# ── Pick lists ────────────────────────────────────────────────────────────────
+
+class PickListLineCreate(BaseModel):
+    article_id: Optional[int] = None
+    description: str
+    quantity: Decimal = Decimal("1")
+    unit: str = "st"
+    location: Optional[str] = None
+
+
+class PickListLineUpdate(BaseModel):
+    quantity: Optional[Decimal] = None
+    picked: Optional[bool] = None
+
+
+class PickListLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    article_id: Optional[int]
+    description: str
+    quantity: Decimal
+    unit: str
+    location: Optional[str]
+    picked: bool
+    article_number: Optional[str] = None
+
+    @classmethod
+    def from_line(cls, line):
+        return cls(
+            id=line.id,
+            article_id=line.article_id,
+            description=line.description,
+            quantity=line.quantity,
+            unit=line.unit,
+            location=line.location,
+            picked=line.picked,
+            article_number=line.article.article_number if line.article else None,
+        )
+
+
+class PickListCreate(BaseModel):
+    title: str
+    notes: Optional[str] = None
+    lines: List[PickListLineCreate] = []
+
+
+class PickListUpdate(BaseModel):
+    title: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PickListListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    title: str
+    notes: Optional[str]
+    created_at: datetime
+    line_count: int = 0
+
+
+class PickListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    title: str
+    notes: Optional[str]
+    created_at: datetime
+    lines: List[PickListLineOut]
+
+
 Token.model_rebuild()

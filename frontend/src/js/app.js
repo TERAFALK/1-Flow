@@ -10,6 +10,7 @@ import { renderTimeEntries } from './pages/time-entries.js';
 import { renderCalendar } from './pages/calendar.js';
 import { renderUsers } from './pages/users.js';
 import { renderSettings } from './pages/settings.js';
+import { renderPickLists } from './pages/pick-lists.js';
 
 // ── Helpers (exported for page modules) ──────────────────────────────────────
 
@@ -51,6 +52,7 @@ const PAGE_TITLES = {
   '/vehicles':     'Fordon',
   '/scanner':      'Scanner',
   '/articles':     'Lager',
+  '/pick-lists':   'Plocklistor',
   '/time-entries': 'Tidrapportering',
   '/calendar':     'Kalender',
   '/users':        'Användare',
@@ -98,6 +100,7 @@ async function route() {
       '/customers':     renderCustomers,
       '/vehicles':      renderVehicles,
       '/articles':      renderArticles,
+      '/pick-lists':    renderPickLists,
       '/scanner':       renderScanner,
       '/time-entries':  renderTimeEntries,
       '/calendar':      renderCalendar,

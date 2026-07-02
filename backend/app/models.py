@@ -336,3 +336,32 @@ class Settings(Base):
 
     key = Column(String, primary_key=True)
     value = Column(String, nullable=False)
+
+
+class PickList(Base):
+    __tablename__ = "pick_lists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    notes = Column(Text)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    creator = relationship("User")
+    lines = relationship("PickListLine", back_populates="pick_list", cascade="all, delete-orphan")
+
+
+class PickListLine(Base):
+    __tablename__ = "pick_list_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pick_list_id = Column(Integer, ForeignKey("pick_lists.id"), nullable=False)
+    article_id = Column(Integer, ForeignKey("articles.id"))
+    description = Column(String, nullable=False)
+    quantity = Column(Numeric(10, 2), default=1, nullable=False)
+    unit = Column(String, default="st")
+    location = Column(String)
+    picked = Column(Boolean, default=False)
+
+    pick_list = relationship("PickList", back_populates="lines")
+    article = relationship("Article")

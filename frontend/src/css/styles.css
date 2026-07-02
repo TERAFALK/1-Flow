@@ -99,20 +99,12 @@ a { color: inherit; text-decoration: none; }
   padding: 18px 16px 16px;
   border-bottom: 1px solid var(--border);
 }
-.login-logo-icon {
-  width: 34px; height: 34px;
-  background: var(--accent);
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
+.brand-logo {
+  height: 26px;
+  width: auto;
+  display: block;
 }
-.login-logo-icon svg { width: 18px; height: 18px; }
-.sidebar-title {
-  font-size: 17px;
-  font-weight: 800;
-  color: var(--text);
-  letter-spacing: -0.4px;
-}
+.brand-logo-sidebar { height: 22px; }
 
 .sidebar-nav {
   flex: 1;
@@ -209,7 +201,7 @@ a { color: inherit; text-decoration: none; }
   gap: 10px;
   margin-bottom: 32px;
 }
-.login-logo span { font-size: 22px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
+.login-logo .brand-logo { height: 34px; }
 .login-card h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 .login-sub { color: var(--text-2); margin-bottom: 28px; font-size: 13.5px; }
 
@@ -457,6 +449,28 @@ tbody tr.clickable { cursor: pointer; }
 }
 .search-wrap input { padding-left: 32px; }
 
+/* ── Pick list article search ───────────────────────────────────────────────── */
+.pl-results {
+  display: none;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+}
+.pl-results.open { display: block; }
+.pl-result-row {
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+.pl-result-row:last-child { border-bottom: none; }
+.pl-result-row:hover { background: var(--bg); }
+
 /* ── Alerts ──────────────────────────────────────────────────────────────────── */
 .alert {
   padding: 10px 14px;
@@ -671,7 +685,7 @@ tbody tr.clickable { cursor: pointer; }
 /* ── Calendar ────────────────────────────────────────────────────────────────── */
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: 34px repeat(7, 1fr);
   gap: 1px;
   background: var(--border);
   border: 1px solid var(--border);
@@ -684,6 +698,12 @@ tbody tr.clickable { cursor: pointer; }
   padding: 8px 4px;
   font-size: 11px; font-weight: 700;
   color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px;
+}
+.cal-week-num {
+  background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  color: var(--text-3);
 }
 .cal-day {
   background: var(--surface);
@@ -854,6 +874,7 @@ tbody tr.clickable { cursor: pointer; }
 .gantt-wrap { overflow-x: auto; }
 .gantt-row {
   display: grid;
+  grid-template-columns: 130px 1fr;
   gap: 0;
   align-items: center;
 }
@@ -866,7 +887,7 @@ tbody tr.clickable { cursor: pointer; }
   text-overflow: ellipsis;
   border-right: 1px solid var(--border);
 }
-.gantt-bar-wrap {
+.gantt-bar-wrap, .gantt-track {
   position: relative;
   height: 28px;
   padding: 0 8px;
@@ -894,6 +915,27 @@ tbody tr.clickable { cursor: pointer; }
   background: var(--accent);
   opacity: .6;
   z-index: 2;
+}
+.gantt-week-header {
+  position: relative;
+  height: 16px;
+  margin-left: 130px;
+}
+.gantt-week-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(2px);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.gantt-week-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: var(--border-light);
+  z-index: 1;
 }
 .gantt-header {
   display: flex;

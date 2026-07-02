@@ -659,27 +659,27 @@ async function loadOverviewGantt(orderId) {
       <div class="card-header"><span class="card-title">Gantt-schema</span></div>
       <div class="card-body" style="overflow-x:auto">
         <div class="gantt-wrap" style="min-width:600px">
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:4px;padding:0 4px">
-            <span>${fmtShort(minDate.toISOString())}</span>
-            <span>Idag: ${fmtShort(today.toISOString())}</span>
-            <span>${fmtShort(maxDate.toISOString())}</span>
-          </div>
-          <div style="position:relative">
-            <div class="gantt-week-header">
+          <div class="gantt-row gantt-row-head">
+            <div class="gantt-label"></div>
+            <div class="gantt-timeline">
               ${weekTicks.map(w => `<span class="gantt-week-tick" style="left:${w.left}%">v.${w.week}</span>`).join('')}
             </div>
-            <div class="gantt-today" style="left:${todayPct}%" title="Idag"></div>
-            ${weekTicks.map(w => `<div class="gantt-week-line" style="left:${w.left}%"></div>`).join('')}
-            ${phases.map(p => `
-              <div class="gantt-row">
-                <div class="gantt-label">${p.name}</div>
-                <div class="gantt-track">
-                  <div class="gantt-bar" style="margin-left:${pct(p.start_date)}%;width:${barWidth(p.start_date,p.end_date)}%;background:${p.color || 'var(--accent)'}">
-                    <span>${fmtShort(p.start_date)} – ${fmtShort(p.end_date)}</span>
-                  </div>
+          </div>
+          ${phases.map(p => `
+            <div class="gantt-row">
+              <div class="gantt-label" title="${p.name}">${p.name}</div>
+              <div class="gantt-timeline">
+                ${weekTicks.map(w => `<div class="gantt-week-line" style="left:${w.left}%"></div>`).join('')}
+                <div class="gantt-today" style="left:${todayPct}%" title="Idag: ${fmtShort(today.toISOString())}"></div>
+                <div class="gantt-bar" style="margin-left:${pct(p.start_date)}%;width:${barWidth(p.start_date,p.end_date)}%;background:${p.color || 'var(--accent)'}" title="${p.name}: ${fmtShort(p.start_date)} – ${fmtShort(p.end_date)}">
+                  <span>${fmtShort(p.start_date)} – ${fmtShort(p.end_date)}</span>
                 </div>
               </div>
-            `).join('')}
+            </div>
+          `).join('')}
+          <div class="gantt-row">
+            <div class="gantt-label text-muted" style="font-size:11px;font-weight:400">Start: ${fmtShort(minDate.toISOString())}</div>
+            <div class="gantt-timeline"><span class="text-muted" style="font-size:11px;position:absolute;right:0">Slut: ${fmtShort(maxDate.toISOString())}</span></div>
           </div>
         </div>
       </div>

@@ -54,7 +54,7 @@ export async function renderArticles(el) {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Artikel</th><th>Art.nr</th><th>Streckkod</th>
+            <th>Artikel</th><th>Art.nr</th><th>Leverantör</th><th>Streckkod</th>
             <th>Plats</th><th class="text-right">Pris</th>
             <th class="text-right">Lager</th><th class="text-right">Min.lager</th><th></th>
           </tr></thead>
@@ -63,6 +63,7 @@ export async function renderArticles(el) {
               <tr>
                 <td><strong>${a.name}</strong>${a.description ? `<br><small class="text-muted">${a.description}</small>` : ''}</td>
                 <td class="font-mono">${a.article_number || '–'}</td>
+                <td>${a.supplier || '–'}</td>
                 <td class="font-mono">${a.barcode || '–'}</td>
                 <td>${a.location || '–'}</td>
                 <td class="text-right">${fmtPrice(a.price)}</td>
@@ -150,6 +151,7 @@ function openArticleForm(article, onSaved) {
           <div class="field"><label>Streckkod (EAN)</label><input type="text" name="barcode" value="${article?.barcode || ''}"></div>
         </div>
         <div class="field"><label>Beskrivning</label><input type="text" name="description" value="${article?.description || ''}"></div>
+        <div class="field"><label>Leverantör</label><input type="text" name="supplier" value="${article?.supplier || ''}"></div>
         <div class="form-row-3">
           <div class="field"><label>Enhet</label>
             <select name="unit">

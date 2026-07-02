@@ -159,14 +159,15 @@ async function openPickListBuilder(onSaved, existingId = null) {
     const matches = allArticles.filter(a =>
       a.name.toLowerCase().includes(q) ||
       (a.article_number || '').toLowerCase().includes(q) ||
-      (a.location || '').toLowerCase().includes(q)
+      (a.location || '').toLowerCase().includes(q) ||
+      (a.supplier || '').toLowerCase().includes(q)
     ).slice(0, 25);
     resultsBox.classList.add('open');
     resultsBox.innerHTML = matches.length
       ? matches.map(a => `
           <div class="pl-result-row" data-add="${a.id}">
             <strong>${a.name}</strong>
-            <span class="text-muted">${a.article_number || ''} ${a.location ? '· ' + a.location : ''}</span>
+            <span class="text-muted">${a.article_number || ''} ${a.location ? '· ' + a.location : ''} ${a.supplier ? '· ' + a.supplier : ''}</span>
           </div>
         `).join('')
       : `<div class="pl-result-row text-muted">Inga träffar</div>`;

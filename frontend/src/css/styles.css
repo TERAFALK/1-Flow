@@ -873,25 +873,31 @@ tbody tr.clickable { cursor: pointer; }
 /* ── Gantt chart ─────────────────────────────────────────────────────────────── */
 .gantt-wrap { overflow-x: auto; }
 .gantt-row {
-  display: grid;
-  grid-template-columns: 130px 1fr;
-  gap: 0;
+  display: flex;
   align-items: center;
+  min-height: 32px;
+  border-bottom: 1px solid var(--border-light);
 }
+.gantt-row:last-child { border-bottom: none; }
+.gantt-row-head { min-height: 20px; }
 .gantt-label {
+  flex: 0 0 140px;
+  width: 140px;
   font-size: 13px;
   font-weight: 600;
-  padding: 8px 12px 8px 0;
+  padding: 6px 12px 6px 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   border-right: 1px solid var(--border);
 }
-.gantt-bar-wrap, .gantt-track {
+.gantt-timeline {
   position: relative;
+  flex: 1;
   height: 28px;
   padding: 0 8px;
 }
+.gantt-row-head .gantt-timeline { height: 18px; }
 .gantt-bar {
   position: absolute;
   height: 20px;
@@ -907,24 +913,20 @@ tbody tr.clickable { cursor: pointer; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  z-index: 2;
 }
 .gantt-today {
   position: absolute;
-  top: 0; bottom: 0;
+  top: -4px; bottom: -4px;
   width: 2px;
   background: var(--accent);
-  opacity: .6;
-  z-index: 2;
-}
-.gantt-week-header {
-  position: relative;
-  height: 16px;
-  margin-left: 130px;
+  opacity: .7;
+  z-index: 1;
 }
 .gantt-week-tick {
   position: absolute;
   top: 0;
-  transform: translateX(2px);
+  transform: translateX(3px);
   font-size: 10px;
   font-weight: 700;
   color: var(--text-3);
@@ -935,7 +937,7 @@ tbody tr.clickable { cursor: pointer; }
   top: 0; bottom: 0;
   width: 1px;
   background: var(--border-light);
-  z-index: 1;
+  z-index: 0;
 }
 .gantt-header {
   display: flex;

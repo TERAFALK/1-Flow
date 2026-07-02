@@ -21,6 +21,8 @@ def _run_migrations():
     stmts = [
         # work_orders – new columns
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS body_text TEXT",
+        # articles – new columns
+        "ALTER TABLE articles ADD COLUMN IF NOT EXISTS supplier VARCHAR",
         # contact_persons
         """CREATE TABLE IF NOT EXISTS contact_persons (
             id SERIAL PRIMARY KEY,
@@ -175,36 +177,43 @@ def create_first_admin():
 
 @app.on_event("startup")
 def import_articles_from_csv():
-    import csv
+    import csv, io, time
     csv_path = os.path.join(os.path.dirname(__file__), "data", "articles_import.csv")
     if not os.path.exists(csv_path):
         return
+    flag_key = "articles_csv_imported_v2"
     db: Session = next(get_db())
     try:
-        flag_key = "articles_csv_imported"
         if db.get(models.Settings, flag_key):
             return
+        t0 = time.time()
+        buf = io.StringIO()
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            batch = []
             for row in reader:
-                batch.append(models.Article(
-                    article_number=row["article_number"] or None,
-                    name=row["name"] or "Okänd artikel",
-                    price=row["price"] or 0,
-                    stock_quantity=row["stock_quantity"] or 0,
-                    location=row["location"] or None,
-                ))
-                if len(batch) >= 1000:
-                    db.bulk_save_objects(batch)
-                    db.commit()
-                    batch = []
-            if batch:
-                db.bulk_save_objects(batch)
-                db.commit()
+                buf.write("\t".join([
+                    (row["article_number"] or "").replace("\t", " "),
+                    (row["name"] or "Okänd artikel").replace("\t", " "),
+                    (row["supplier"] or "").replace("\t", " "),
+                    (row["location"] or "").replace("\t", " "),
+                ]) + "\n")
+        buf.seek(0)
+
+        raw_conn = db.connection().connection
+        cur = raw_conn.cursor()
+        cur.execute("CREATE TEMP TABLE _articles_stage (article_number text, name text, supplier text, location text)")
+        cur.copy_expert("COPY _articles_stage (article_number, name, supplier, location) FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '')", buf)
+        cur.execute("""
+            INSERT INTO articles (article_number, name, supplier, location, unit, price, stock_quantity, min_stock, created_at)
+            SELECT NULLIF(article_number, ''), name, NULLIF(supplier, ''), NULLIF(location, ''), 'st', 0, 0, 0, NOW()
+            FROM _articles_stage
+        """)
+        raw_conn.commit()
+        cur.close()
+
         db.add(models.Settings(key=flag_key, value="1"))
         db.commit()
-        print("Artiklar importerade från articles_import.csv")
+        print(f"Artiklar importerade från articles_import.csv på {time.time() - t0:.1f}s")
     finally:
         db.close()
 

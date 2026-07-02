@@ -161,6 +161,7 @@ class ArticleCreate(BaseModel):
     barcode: Optional[str] = None
     name: str
     description: Optional[str] = None
+    supplier: Optional[str] = None
     unit: str = "st"
     price: Decimal = Decimal("0")
     stock_quantity: Decimal = Decimal("0")
@@ -173,6 +174,7 @@ class ArticleUpdate(BaseModel):
     barcode: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
+    supplier: Optional[str] = None
     unit: Optional[str] = None
     price: Optional[Decimal] = None
     stock_quantity: Optional[Decimal] = None
@@ -187,6 +189,7 @@ class ArticleOut(BaseModel):
     barcode: Optional[str]
     name: str
     description: Optional[str]
+    supplier: Optional[str]
     unit: str
     price: Decimal
     stock_quantity: Decimal

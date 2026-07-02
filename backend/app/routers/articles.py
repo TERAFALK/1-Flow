@@ -22,7 +22,9 @@ def list_articles(
         query = query.filter(
             Article.name.ilike(f"%{q}%") |
             Article.article_number.ilike(f"%{q}%") |
-            Article.barcode.ilike(f"%{q}%")
+            Article.barcode.ilike(f"%{q}%") |
+            Article.supplier.ilike(f"%{q}%") |
+            Article.location.ilike(f"%{q}%")
         )
     if low_stock:
         query = query.filter(Article.stock_quantity <= Article.min_stock)

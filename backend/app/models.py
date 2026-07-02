@@ -272,6 +272,7 @@ class Article(Base):
     barcode = Column(String, index=True)
     name = Column(String, nullable=False)
     description = Column(Text)
+    supplier = Column(String)
     unit = Column(String, default="st")
     price = Column(Numeric(10, 2), default=0)
     stock_quantity = Column(Numeric(10, 2), default=0)

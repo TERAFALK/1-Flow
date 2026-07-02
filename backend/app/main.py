@@ -186,16 +186,20 @@ def import_articles_from_csv():
     try:
         if db.get(models.Settings, flag_key):
             return
+        def clean(v, default=""):
+            v = (v or default).replace("\t", " ").replace("\r", " ").replace("\n", " ").replace('"', "'").strip()
+            return v
+
         t0 = time.time()
         buf = io.StringIO()
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 buf.write("\t".join([
-                    (row["article_number"] or "").replace("\t", " "),
-                    (row["name"] or "Okänd artikel").replace("\t", " "),
-                    (row["supplier"] or "").replace("\t", " "),
-                    (row["location"] or "").replace("\t", " "),
+                    clean(row["article_number"]),
+                    clean(row["name"], "Okänd artikel"),
+                    clean(row["supplier"]),
+                    clean(row["location"]),
                 ]) + "\n")
         buf.seek(0)
 

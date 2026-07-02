@@ -1,7 +1,7 @@
-import { api } from '../api.js?v=4';
-import { fmtDate, statusBadge } from '../app.js?v=4';
-import { openModal, closeModal, confirmDialog } from '../components/modal.js?v=4';
-import { showToast } from '../components/toast.js?v=4';
+import { api } from '../api.js';
+import { fmtDate, statusBadge } from '../app.js';
+import { openModal, closeModal, confirmDialog } from '../components/modal.js';
+import { showToast } from '../components/toast.js';
 
 export async function renderCustomers(el) {
   const topbarActions = document.getElementById('topbar-actions');

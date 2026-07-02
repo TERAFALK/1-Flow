@@ -1,7 +1,7 @@
-import { api } from '../api.js?v=4';
-import { fmtDate, fmtDuration } from '../app.js?v=4';
-import { openModal, closeModal, confirmDialog } from '../components/modal.js?v=4';
-import { showToast } from '../components/toast.js?v=4';
+import { api } from '../api.js';
+import { fmtDate, fmtDuration } from '../app.js';
+import { openModal, closeModal, confirmDialog } from '../components/modal.js';
+import { showToast } from '../components/toast.js';
 
 export async function renderTimeEntries(el) {
   el.innerHTML = '<div class="loading">Laddar…</div>';

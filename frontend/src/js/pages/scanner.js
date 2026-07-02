@@ -1,5 +1,5 @@
-import { api } from '../api.js?v=4';
-import { showToast } from '../components/toast.js?v=4';
+import { api } from '../api.js';
+import { showToast } from '../components/toast.js';
 
 export async function renderScanner(el) {
   const orders = await api.get('/work-orders').catch(() => []);

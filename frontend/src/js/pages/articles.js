@@ -1,6 +1,6 @@
-import { api, uploadFile } from '../api.js?v=4';
-import { openModal, closeModal, confirmDialog } from '../components/modal.js?v=4';
-import { showToast } from '../components/toast.js?v=4';
+import { api, uploadFile } from '../api.js';
+import { openModal, closeModal, confirmDialog } from '../components/modal.js';
+import { showToast } from '../components/toast.js';
 
 const PAGE_SIZE = 100;
 

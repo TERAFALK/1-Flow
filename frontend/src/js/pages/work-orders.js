@@ -71,7 +71,7 @@ export async function renderWorkOrders(el, params = {}) {
           </tr></thead>
           <tbody>
             ${orders.map(o => `
-              <tr class="clickable" onclick="location.hash='#/work-orders/${o.id}'">
+              <tr class="clickable" data-row="${o.id}">
                 <td><strong>${o.order_number}</strong></td>
                 <td>${o.customer?.name || '–'}</td>
                 <td>${o.vehicle?.license_plate ? `<span class="font-mono">${o.vehicle.license_plate}</span>` : '–'}</td>
@@ -79,8 +79,8 @@ export async function renderWorkOrders(el, params = {}) {
                 <td>${o.assigned_to_user?.full_name || '–'}</td>
                 <td class="text-muted">${o.scheduled_date ? fmtDate(o.scheduled_date) : '–'}</td>
                 <td>${statusBadge(o.status)}</td>
-                <td onclick="event.stopPropagation()">
-                  <button class="btn-icon" title="Ta bort order" onclick="window._deleteWOFromList(${o.id})">
+                <td>
+                  <button type="button" class="btn-icon" title="Ta bort order" data-delete-wo="${o.id}">
                     <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                   </button>
                 </td>
@@ -90,14 +90,21 @@ export async function renderWorkOrders(el, params = {}) {
         </table>
       </div>
     `;
+    list.querySelectorAll('[data-row]').forEach(row => {
+      row.addEventListener('click', () => { location.hash = `#/work-orders/${row.dataset.row}`; });
+    });
+    list.querySelectorAll('[data-delete-wo]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const orderId = btn.dataset.deleteWo;
+        if (await confirmDialog('Ta bort denna arbetsorder permanent?')) {
+          await api.delete(`/work-orders/${orderId}`);
+          showToast('Arbetsorder borttagen', 'success');
+          reload();
+        }
+      });
+    });
   }
-  window._deleteWOFromList = async (orderId) => {
-    if (await confirmDialog('Ta bort denna arbetsorder permanent?')) {
-      await api.delete(`/work-orders/${orderId}`);
-      showToast('Arbetsorder borttagen', 'success');
-      reload();
-    }
-  };
   await reload();
 }
 

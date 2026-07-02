@@ -22,6 +22,10 @@ window.addEventListener('unhandledrejection', (e) => {
   console.error('Ohanterat promise-fel:', e.reason);
   showToast(`Fel: ${e.reason?.message || e.reason}`, 'error');
 });
+document.addEventListener('securitypolicyviolation', (e) => {
+  console.error('CSP-blockering:', e.violatedDirective, e.blockedURI, e.sourceFile, e.lineNumber);
+  showToast(`CSP blockerar: ${e.violatedDirective}`, 'error');
+});
 
 // ── Helpers (exported for page modules) ──────────────────────────────────────
 

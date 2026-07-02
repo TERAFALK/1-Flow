@@ -43,11 +43,11 @@ export async function renderPickLists(el) {
                 <td class="text-muted">${fmtDate(p.created_at, true)}</td>
                 <td>
                   <div class="flex gap-2">
-                    <button class="btn btn-ghost btn-sm" onclick="window._openPickList(${p.id})">Öppna</button>
-                    <button class="btn-icon" title="Ladda ner PDF" onclick="window._downloadPickListPdf(${p.id}, '${p.title.replace(/'/g, "\\'")}')">
+                    <button type="button" class="btn btn-ghost btn-sm" data-open="${p.id}">Öppna</button>
+                    <button type="button" class="btn-icon" title="Ladda ner PDF" data-pdf="${p.id}" data-title="${p.title.replace(/"/g, '&quot;')}">
                       <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
                     </button>
-                    <button class="btn-icon" title="Ta bort" onclick="window._deletePickList(${p.id})">
+                    <button type="button" class="btn-icon" title="Ta bort" data-delete="${p.id}">
                       <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                     </button>
                   </div>
@@ -60,15 +60,24 @@ export async function renderPickLists(el) {
     `;
   }
 
-  window._openPickList = (id) => openPickListBuilder(reload, id);
-  window._downloadPickListPdf = (id, title) => downloadFile(`/pick-lists/${id}/pdf`, `plocklista-${title || id}.pdf`).catch(err => showToast(err.message, 'error'));
-  window._deletePickList = async (id) => {
-    if (await confirmDialog('Ta bort denna plocklista?')) {
-      await api.delete(`/pick-lists/${id}`);
-      showToast('Plocklista borttagen', 'success');
-      reload();
+  document.getElementById('picklist-content').addEventListener('click', async (e) => {
+    const openBtn = e.target.closest('[data-open]');
+    const pdfBtn = e.target.closest('[data-pdf]');
+    const delBtn = e.target.closest('[data-delete]');
+    if (openBtn) {
+      openPickListBuilder(reload, parseInt(openBtn.dataset.open));
+    } else if (pdfBtn) {
+      try {
+        await downloadFile(`/pick-lists/${pdfBtn.dataset.pdf}/pdf`, `plocklista-${pdfBtn.dataset.title || pdfBtn.dataset.pdf}.pdf`);
+      } catch (err) { showToast(err.message, 'error'); }
+    } else if (delBtn) {
+      if (await confirmDialog('Ta bort denna plocklista?')) {
+        await api.delete(`/pick-lists/${delBtn.dataset.delete}`);
+        showToast('Plocklista borttagen', 'success');
+        reload();
+      }
     }
-  };
+  });
 
   await reload();
 }

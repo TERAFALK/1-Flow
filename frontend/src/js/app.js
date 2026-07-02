@@ -1,16 +1,27 @@
-import { api } from './api.js';
-import { showToast } from './components/toast.js';
-import { renderDashboard } from './pages/dashboard.js';
-import { renderWorkOrders, renderNewWorkOrder, renderWorkOrderDetail } from './pages/work-orders.js';
-import { renderCustomers, renderCustomerDetail } from './pages/customers.js';
-import { renderVehicles, renderVehicleDetail } from './pages/vehicles.js';
-import { renderArticles } from './pages/articles.js';
-import { renderScanner } from './pages/scanner.js';
-import { renderTimeEntries } from './pages/time-entries.js';
-import { renderCalendar } from './pages/calendar.js';
-import { renderUsers } from './pages/users.js';
-import { renderSettings } from './pages/settings.js';
-import { renderPickLists } from './pages/pick-lists.js';
+import { api } from './api.js?v=4';
+import { showToast } from './components/toast.js?v=4';
+import { renderDashboard } from './pages/dashboard.js?v=4';
+import { renderWorkOrders, renderNewWorkOrder, renderWorkOrderDetail } from './pages/work-orders.js?v=4';
+import { renderCustomers, renderCustomerDetail } from './pages/customers.js?v=4';
+import { renderVehicles, renderVehicleDetail } from './pages/vehicles.js?v=4';
+import { renderArticles } from './pages/articles.js?v=4';
+import { renderScanner } from './pages/scanner.js?v=4';
+import { renderTimeEntries } from './pages/time-entries.js?v=4';
+import { renderCalendar } from './pages/calendar.js?v=4';
+import { renderUsers } from './pages/users.js?v=4';
+import { renderSettings } from './pages/settings.js?v=4';
+import { renderPickLists } from './pages/pick-lists.js?v=4';
+
+console.log('Flow app.js loaded', new Date().toISOString());
+
+window.addEventListener('error', (e) => {
+  console.error('Ohanterat fel:', e.error || e.message);
+  showToast(`Fel: ${e.error?.message || e.message}`, 'error');
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('Ohanterat promise-fel:', e.reason);
+  showToast(`Fel: ${e.reason?.message || e.reason}`, 'error');
+});
 
 // ── Helpers (exported for page modules) ──────────────────────────────────────
 
@@ -194,5 +205,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('hashchange', route);
 
   // Make closeModal global for inline onclick handlers
-  window.closeModal = (await import('./components/modal.js')).closeModal;
+  window.closeModal = (await import('./components/modal.js?v=4')).closeModal;
 });

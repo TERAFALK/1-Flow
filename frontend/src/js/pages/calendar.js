@@ -1,5 +1,5 @@
-import { api } from '../api.js';
-import { statusBadge } from '../app.js';
+import { api } from '../api.js?v=4';
+import { statusBadge } from '../app.js?v=4';
 
 export async function renderCalendar(el) {
   const now = new Date();

@@ -1,7 +1,7 @@
-import { api, downloadFile } from '../api.js';
-import { fmtDate } from '../app.js';
-import { openModal, closeModal, confirmDialog } from '../components/modal.js';
-import { showToast } from '../components/toast.js';
+import { api, downloadFile } from '../api.js?v=4';
+import { fmtDate } from '../app.js?v=4';
+import { openModal, closeModal, confirmDialog } from '../components/modal.js?v=4';
+import { showToast } from '../components/toast.js?v=4';
 
 export async function renderPickLists(el) {
   el.innerHTML = `

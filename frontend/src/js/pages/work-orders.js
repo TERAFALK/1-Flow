@@ -1,7 +1,7 @@
-import { api } from '../api.js';
-import { statusBadge, fmtDate, fmtDuration } from '../app.js';
-import { openModal, closeModal, confirmDialog } from '../components/modal.js';
-import { showToast } from '../components/toast.js';
+import { api } from '../api.js?v=4';
+import { statusBadge, fmtDate, fmtDuration } from '../app.js?v=4';
+import { openModal, closeModal, confirmDialog } from '../components/modal.js?v=4';
+import { showToast } from '../components/toast.js?v=4';
 
 const STATUS_FLOW = {
   ny:          { next: 'planerad',  label: 'Markera Planerad' },

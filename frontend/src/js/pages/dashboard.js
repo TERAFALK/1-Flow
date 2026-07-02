@@ -1,5 +1,5 @@
-import { api } from '../api.js';
-import { statusBadge, fmtDate } from '../app.js';
+import { api } from '../api.js?v=4';
+import { statusBadge, fmtDate } from '../app.js?v=4';
 
 export async function renderDashboard(el) {
   el.innerHTML = '<div class="loading">Laddar…</div>';

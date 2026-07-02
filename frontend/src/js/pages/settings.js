@@ -1,5 +1,5 @@
-import { api } from '../api.js';
-import { showToast } from '../components/toast.js';
+import { api } from '../api.js?v=4';
+import { showToast } from '../components/toast.js?v=4';
 
 export async function renderSettings(el) {
   el.innerHTML = '<div class="loading">Laddar inställningar…</div>';

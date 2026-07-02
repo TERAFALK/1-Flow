@@ -182,6 +182,11 @@ class ArticleUpdate(BaseModel):
     location: Optional[str] = None
 
 
+class ArticleImportResult(BaseModel):
+    imported: int
+    seconds: float
+
+
 class ArticleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

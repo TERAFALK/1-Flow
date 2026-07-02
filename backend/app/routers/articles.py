@@ -1,10 +1,12 @@
+import io
+import time
 from typing import List, Optional
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user
-from ..schemas import ArticleCreate, ArticleUpdate, ArticleOut, StockTransactionOut
+from ..schemas import ArticleCreate, ArticleUpdate, ArticleOut, StockTransactionOut, ArticleImportResult
 from ..models import Article, StockTransaction, StockTransactionType, User
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
@@ -13,7 +15,8 @@ router = APIRouter(prefix="/api/articles", tags=["articles"])
 @router.get("", response_model=List[ArticleOut])
 def list_articles(
     q: Optional[str] = Query(None),
-    low_stock: bool = Query(False),
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -26,9 +29,72 @@ def list_articles(
             Article.supplier.ilike(f"%{q}%") |
             Article.location.ilike(f"%{q}%")
         )
-    if low_stock:
-        query = query.filter(Article.stock_quantity <= Article.min_stock)
-    return query.order_by(Article.name).all()
+    return query.order_by(Article.name).offset(offset).limit(limit).all()
+
+
+@router.post("/import-excel", response_model=ArticleImportResult)
+async def import_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Skriver över hela lagret med artiklar från en uppladdad Excel-fil.
+
+    Förväntade kolumner (SBT-artikellista): Artikelkod, Benämning, ... Företag (kol M), Lagerplats.
+    """
+    import openpyxl
+
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    except Exception:
+        raise HTTPException(400, "Kunde inte läsa Excel-filen")
+    ws = wb.worksheets[0]
+
+    t0 = time.time()
+    rows_out = []
+    seen = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 13:
+            continue
+        code, name, company, location = row[0], row[1], row[12], row[9]
+        if not code or not name:
+            continue
+        code = str(code).strip()
+        if code in seen:
+            continue
+        seen.add(code)
+        clean = lambda v: (str(v).strip() if v else "").replace("\t", " ").replace("\r", " ").replace("\n", " ").replace('"', "'")
+        rows_out.append((clean(code), clean(name) or "Okänd artikel", clean(company), clean(location)))
+
+    if not rows_out:
+        raise HTTPException(400, "Inga giltiga rader hittades i filen")
+
+    buf = io.StringIO()
+    for code, name, company, location in rows_out:
+        buf.write("\t".join([code, name, company, location]) + "\n")
+    buf.seek(0)
+
+    raw_conn = db.connection().connection
+    cur = raw_conn.cursor()
+    cur.execute("CREATE TEMP TABLE _articles_stage (article_number text, name text, supplier text, location text)")
+    cur.copy_expert(
+        "COPY _articles_stage (article_number, name, supplier, location) FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '')",
+        buf,
+    )
+    cur.execute("UPDATE work_order_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
+    cur.execute("UPDATE pick_list_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
+    cur.execute("DELETE FROM stock_transactions")
+    cur.execute("DELETE FROM articles")
+    cur.execute("""
+        INSERT INTO articles (article_number, name, supplier, location, unit, price, stock_quantity, min_stock, created_at)
+        SELECT NULLIF(article_number, ''), name, NULLIF(supplier, ''), NULLIF(location, ''), 'st', 0, 0, 0, NOW()
+        FROM _articles_stage
+    """)
+    raw_conn.commit()
+    cur.close()
+
+    return ArticleImportResult(imported=len(rows_out), seconds=round(time.time() - t0, 1))
 
 
 @router.post("", response_model=ArticleOut, status_code=status.HTTP_201_CREATED)

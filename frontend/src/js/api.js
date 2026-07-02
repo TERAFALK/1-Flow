@@ -32,6 +32,18 @@ export const api = {
   delete: (url)        => request(url, { method: 'DELETE' }),
 };
 
+export async function uploadFile(url, formData) {
+  const token = localStorage.getItem('flow_token');
+  const res = await fetch(`${BASE}${url}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data;
+}
+
 export async function downloadFile(url, filename) {
   const token = localStorage.getItem('flow_token');
   const res = await fetch(`${BASE}${url}`, {

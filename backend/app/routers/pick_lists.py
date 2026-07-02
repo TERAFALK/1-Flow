@@ -134,11 +134,19 @@ def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = De
     c.setFillColor(colors.black)
     y -= 20
 
-    col_x = {"check": margin, "art": margin + 10 * mm, "desc": margin + 42 * mm, "qty": page_w - margin - 45 * mm, "unit": page_w - margin - 25 * mm, "loc": page_w - margin - 55 * mm}
+    col_x = {
+        "check": margin,
+        "art": margin + 9 * mm,
+        "desc": margin + 34 * mm,
+        "loc": margin + 96 * mm,
+        "qty": margin + 112 * mm,
+        "unit": margin + 122 * mm,
+        "rest": margin + 136 * mm,
+        "levererat": margin + 156 * mm,
+    }
 
     def header_row(yy):
         c.setFont("Helvetica-Bold", 9)
-        c.setFillColor(colors.white)
         c.setFillColor(colors.HexColor("#1a1a1a"))
         c.rect(margin, yy - 14, page_w - 2 * margin, 16, fill=1, stroke=0)
         c.setFillColor(colors.white)
@@ -148,11 +156,13 @@ def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = De
         c.drawString(col_x["loc"], yy - 10, "Plats")
         c.drawString(col_x["qty"], yy - 10, "Antal")
         c.drawString(col_x["unit"], yy - 10, "Enhet")
+        c.drawString(col_x["rest"], yy - 10, "Rest")
+        c.drawString(col_x["levererat"], yy - 10, "Levererat")
         c.setFillColor(colors.black)
         return yy - 18
 
     y = header_row(y)
-    c.setFont("Helvetica", 9)
+    c.setFont("Helvetica", 8.5)
     row_h = 16
     for line in pl.lines:
         if y < 25 * mm:
@@ -160,14 +170,18 @@ def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = De
             y = draw_header(c, page_w, "Plocklista", pl.title)
             y -= 10
             y = header_row(y)
-            c.setFont("Helvetica", 9)
+            c.setFont("Helvetica", 8.5)
         c.rect(col_x["check"], y - 9, 9, 9, stroke=1, fill=0)
         art_nr = line.article.article_number if line.article else ""
-        c.drawString(col_x["art"], y - 8, (art_nr or "")[:14])
-        c.drawString(col_x["desc"], y - 8, (line.description or "")[:38])
-        c.drawString(col_x["loc"], y - 8, (line.location or "")[:10])
-        c.drawRightString(col_x["unit"] - 4, y - 8, f"{float(line.quantity):g}")
+        c.drawString(col_x["art"], y - 8, (art_nr or "")[:12])
+        c.drawString(col_x["desc"], y - 8, (line.description or "")[:34])
+        c.drawString(col_x["loc"], y - 8, (line.location or "")[:8])
+        c.drawRightString(col_x["unit"] - 3, y - 8, f"{float(line.quantity):g}")
         c.drawString(col_x["unit"], y - 8, line.unit or "st")
+        # blank handwriting lines for "Rest" / "Levererat"
+        c.setStrokeColor(colors.HexColor("#999999"))
+        c.line(col_x["rest"], y - 12, col_x["levererat"] - 4 * mm, y - 12)
+        c.line(col_x["levererat"], y - 12, page_w - margin, y - 12)
         c.setStrokeColor(colors.HexColor("#dddddd"))
         c.line(margin, y - row_h + 2, page_w - margin, y - row_h + 2)
         c.setStrokeColor(colors.black)

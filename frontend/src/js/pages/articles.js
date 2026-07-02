@@ -1,79 +1,106 @@
-import { api } from '../api.js';
+import { api, uploadFile } from '../api.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 
+const PAGE_SIZE = 100;
+
 export async function renderArticles(el) {
+  let offset = 0;
+  let allRows = [];
+
   el.innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">Lager & Artiklar</div>
-        <div class="page-subtitle">Artikelregister och lagersaldo</div>
+        <div class="page-subtitle">Artikelregister</div>
       </div>
-      <button class="btn btn-primary" id="new-article-btn">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
-        Ny artikel
-      </button>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary" id="import-excel-btn">Importera Excel</button>
+        <input type="file" id="import-excel-input" accept=".xlsx,.xls" class="hidden">
+        <button class="btn btn-primary" id="new-article-btn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+          Ny artikel
+        </button>
+      </div>
     </div>
     <div class="card">
       <div class="card-header">
         <div class="search-wrap">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
-          <input type="search" id="article-search" placeholder="Sök artikel, art.nr, streckkod…">
+          <input type="search" id="article-search" placeholder="Sök artikel, art.nr, företag, plats…">
         </div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="low-stock-filter"> Visa endast lågt lager
-        </label>
       </div>
       <div id="article-list"><div class="loading">Laddar…</div></div>
+      <div class="card-body" style="text-align:center;padding-top:8px" id="article-load-more-wrap"></div>
     </div>
   `;
 
   document.getElementById('new-article-btn').addEventListener('click', () => openArticleForm(null, reload));
 
+  const importInput = document.getElementById('import-excel-input');
+  document.getElementById('import-excel-btn').addEventListener('click', () => importInput.click());
+  importInput.addEventListener('change', async () => {
+    const file = importInput.files[0];
+    if (!file) return;
+    const ok = await confirmDialog(`Detta skriver <strong>över hela artikellagret</strong> med innehållet i <strong>${file.name}</strong>. Alla befintliga artiklar tas bort och ersätts. Fortsätta?`);
+    importInput.value = '';
+    if (!ok) return;
+    const btn = document.getElementById('import-excel-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importerar…';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const result = await uploadFile('/articles/import-excel', fd);
+      showToast(`${result.imported} artiklar importerade på ${result.seconds}s`, 'success');
+      reload();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Importera Excel';
+    }
+  });
+
   let timer;
-  document.getElementById('article-search').addEventListener('input', (e) => {
+  document.getElementById('article-search').addEventListener('input', () => {
     clearTimeout(timer);
     timer = setTimeout(reload, 300);
   });
-  document.getElementById('low-stock-filter').addEventListener('change', reload);
 
-  async function loadList() {
+  async function loadPage(reset) {
     const list = document.getElementById('article-list');
     if (!list) return;
+    if (reset) { offset = 0; allRows = []; }
     const q = document.getElementById('article-search')?.value || '';
-    const lowStock = document.getElementById('low-stock-filter')?.checked || false;
-    let url = `/articles?`;
-    if (q) url += `q=${encodeURIComponent(q)}&`;
-    if (lowStock) url += `low_stock=true&`;
-    const articles = await api.get(url);
-    if (!articles.length) {
+    let url = `/articles?limit=${PAGE_SIZE}&offset=${offset}`;
+    if (q) url += `&q=${encodeURIComponent(q)}`;
+    const page = await api.get(url);
+    allRows = reset ? page : allRows.concat(page);
+    offset += page.length;
+
+    if (!allRows.length) {
       list.innerHTML = `<div class="empty-state"><p>Inga artiklar hittade</p></div>`;
+      document.getElementById('article-load-more-wrap').innerHTML = '';
       return;
     }
     list.innerHTML = `
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Artikel</th><th>Art.nr</th><th>Leverantör</th><th>Streckkod</th>
-            <th>Plats</th><th class="text-right">Pris</th>
-            <th class="text-right">Lager</th><th class="text-right">Min.lager</th><th></th>
+            <th>Artikel</th><th>Art.nr</th><th>Företag</th><th>Streckkod</th>
+            <th>Plats</th><th></th>
           </tr></thead>
           <tbody>
-            ${articles.map(a => `
+            ${allRows.map(a => `
               <tr>
                 <td><strong>${a.name}</strong>${a.description ? `<br><small class="text-muted">${a.description}</small>` : ''}</td>
                 <td class="font-mono">${a.article_number || '–'}</td>
                 <td>${a.supplier || '–'}</td>
                 <td class="font-mono">${a.barcode || '–'}</td>
                 <td>${a.location || '–'}</td>
-                <td class="text-right">${fmtPrice(a.price)}</td>
-                <td class="text-right quantity-cell ${parseFloat(a.stock_quantity) <= parseFloat(a.min_stock) ? 'stock-low' : ''}">
-                  ${a.stock_quantity} ${a.unit}
-                </td>
-                <td class="text-right text-muted">${a.min_stock} ${a.unit}</td>
                 <td>
                   <div class="flex gap-2">
-                    <button class="btn btn-ghost btn-sm" onclick="window._adjustStock(${a.id}, '${a.name.replace(/'/g, "\\'")}')">Justera</button>
                     <button class="btn-icon" title="Redigera" onclick="window._editArticle(${a.id})">
                       <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
                     </button>
@@ -88,9 +115,14 @@ export async function renderArticles(el) {
         </table>
       </div>
     `;
+    const moreWrap = document.getElementById('article-load-more-wrap');
+    moreWrap.innerHTML = page.length === PAGE_SIZE
+      ? `<button class="btn btn-ghost" id="article-load-more">Ladda fler</button>`
+      : '';
+    document.getElementById('article-load-more')?.addEventListener('click', () => loadPage(false));
   }
 
-  function reload() { loadList(); }
+  function reload() { loadPage(true); }
 
   window._editArticle = async (id) => {
     const a = await api.get(`/articles/${id}`);
@@ -103,40 +135,8 @@ export async function renderArticles(el) {
       reload();
     }
   };
-  window._adjustStock = (id, name) => {
-    openModal({
-      title: `Justera lager – ${name}`,
-      body: `
-        <form id="adjust-form">
-          <div class="field">
-            <label>Antal att lägga till (negativt för att ta bort)</label>
-            <input type="number" name="quantity" placeholder="t.ex. 10 eller -5" step="0.01" required autofocus>
-          </div>
-          <div class="field"><label>Anteckning</label><input type="text" name="notes" placeholder="Orsak…"></div>
-          <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
-            <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
-            <button type="submit" class="btn btn-primary">Justera</button>
-          </div>
-        </form>
-      `,
-    });
-    document.getElementById('adjust-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const { quantity, notes } = Object.fromEntries(new FormData(e.target));
-      try {
-        await api.post(`/articles/${id}/adjust?quantity=${quantity}${notes ? `&notes=${encodeURIComponent(notes)}` : ''}`);
-        showToast('Lagerjustering sparad', 'success');
-        closeModal();
-        reload();
-      } catch (err) { showToast(err.message, 'error'); }
-    });
-  };
 
-  await loadList();
-}
-
-function fmtPrice(p) {
-  return parseFloat(p).toLocaleString('sv-SE', { minimumFractionDigits: 2 }) + ' kr';
+  await loadPage(true);
 }
 
 function openArticleForm(article, onSaved) {
@@ -151,23 +151,9 @@ function openArticleForm(article, onSaved) {
           <div class="field"><label>Streckkod (EAN)</label><input type="text" name="barcode" value="${article?.barcode || ''}"></div>
         </div>
         <div class="field"><label>Beskrivning</label><input type="text" name="description" value="${article?.description || ''}"></div>
-        <div class="field"><label>Leverantör</label><input type="text" name="supplier" value="${article?.supplier || ''}"></div>
-        <div class="form-row-3">
-          <div class="field"><label>Enhet</label>
-            <select name="unit">
-              <option value="st" ${article?.unit === 'st' ? 'selected' : ''}>st</option>
-              <option value="liter" ${article?.unit === 'liter' ? 'selected' : ''}>liter</option>
-              <option value="kg" ${article?.unit === 'kg' ? 'selected' : ''}>kg</option>
-              <option value="m" ${article?.unit === 'm' ? 'selected' : ''}>m</option>
-              <option value="set" ${article?.unit === 'set' ? 'selected' : ''}>set</option>
-            </select>
-          </div>
-          <div class="field"><label>Pris (kr)</label><input type="number" name="price" value="${article?.price || '0'}" step="0.01" min="0"></div>
-          <div class="field"><label>Plats i lager</label><input type="text" name="location" value="${article?.location || ''}" placeholder="t.ex. A1-03"></div>
-        </div>
         <div class="form-row">
-          <div class="field"><label>Lagersaldo</label><input type="number" name="stock_quantity" value="${article?.stock_quantity || '0'}" step="0.01"></div>
-          <div class="field"><label>Min. lagernivå (varning under)</label><input type="number" name="min_stock" value="${article?.min_stock || '0'}" step="0.01" min="0"></div>
+          <div class="field"><label>Företag</label><input type="text" name="supplier" value="${article?.supplier || ''}"></div>
+          <div class="field"><label>Plats i lager</label><input type="text" name="location" value="${article?.location || ''}" placeholder="t.ex. A1-03"></div>
         </div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
@@ -180,7 +166,6 @@ function openArticleForm(article, onSaved) {
   document.getElementById('article-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target));
-    ['price', 'stock_quantity', 'min_stock'].forEach(k => { body[k] = parseFloat(body[k]) || 0; });
     Object.keys(body).forEach(k => { if (body[k] === '') body[k] = null; });
     try {
       if (article) {

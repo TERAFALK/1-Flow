@@ -175,53 +175,6 @@ def create_first_admin():
         db.close()
 
 
-@app.on_event("startup")
-def import_articles_from_csv():
-    import csv, io, time
-    csv_path = os.path.join(os.path.dirname(__file__), "data", "articles_import.csv")
-    if not os.path.exists(csv_path):
-        return
-    flag_key = "articles_csv_imported_v2"
-    db: Session = next(get_db())
-    try:
-        if db.get(models.Settings, flag_key):
-            return
-        def clean(v, default=""):
-            v = (v or default).replace("\t", " ").replace("\r", " ").replace("\n", " ").replace('"', "'").strip()
-            return v
-
-        t0 = time.time()
-        buf = io.StringIO()
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                buf.write("\t".join([
-                    clean(row["article_number"]),
-                    clean(row["name"], "Okänd artikel"),
-                    clean(row["supplier"]),
-                    clean(row["location"]),
-                ]) + "\n")
-        buf.seek(0)
-
-        raw_conn = db.connection().connection
-        cur = raw_conn.cursor()
-        cur.execute("CREATE TEMP TABLE _articles_stage (article_number text, name text, supplier text, location text)")
-        cur.copy_expert("COPY _articles_stage (article_number, name, supplier, location) FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '')", buf)
-        cur.execute("""
-            INSERT INTO articles (article_number, name, supplier, location, unit, price, stock_quantity, min_stock, created_at)
-            SELECT NULLIF(article_number, ''), name, NULLIF(supplier, ''), NULLIF(location, ''), 'st', 0, 0, 0, NOW()
-            FROM _articles_stage
-        """)
-        raw_conn.commit()
-        cur.close()
-
-        db.add(models.Settings(key=flag_key, value="1"))
-        db.commit()
-        print(f"Artiklar importerade från articles_import.csv på {time.time() - t0:.1f}s")
-    finally:
-        db.close()
-
-
 @app.get("/api/health")
 def health():
     return {"status": "ok"}

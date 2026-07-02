@@ -208,10 +208,9 @@ export async function renderWorkOrderDetail(el, id) {
 }
 
 async function loadDetail(el, id) {
-  const [wo, users, articles] = await Promise.all([
+  const [wo, users] = await Promise.all([
     api.get(`/work-orders/${id}`),
     api.get('/users'),
-    api.get('/articles'),
   ]);
 
   const flow = STATUS_FLOW[wo.status];
@@ -453,7 +452,7 @@ async function loadDetail(el, id) {
 
   // ── Add line ────────────────────────────────────────────────────────────────
   document.getElementById('add-line-btn').addEventListener('click', () =>
-    openAddLineForm(wo.id, articles, () => loadDetail(el, id))
+    openAddLineForm(wo.id, null, () => loadDetail(el, id))
   );
 
   // ── Phase button ────────────────────────────────────────────────────────────
@@ -1314,17 +1313,20 @@ function lineRow(l) {
   </tr>`;
 }
 
-function openAddLineForm(orderId, articles, onSaved) {
+function openAddLineForm(orderId, _articlesUnused, onSaved) {
+  let selectedArticle = null;
   openModal({
     title: 'Lägg till artikel',
     body: `
       <form id="add-line-form">
         <div class="field">
-          <label>Välj artikel från lager</label>
-          <select id="line-article-select">
-            <option value="">– Välj artikel eller lägg till manuellt –</option>
-            ${articles.map(a => `<option value="${a.id}" data-name="${a.name}" data-price="${a.price}" data-unit="${a.unit}">${a.name} (${a.article_number || a.barcode || '–'})</option>`).join('')}
-          </select>
+          <label>Sök artikel i lager (valfritt)</label>
+          <div class="search-wrap" style="max-width:none">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+            <input type="search" id="line-article-search" placeholder="Namn, art.nr, plats…">
+          </div>
+          <div id="line-article-results" class="pl-results"></div>
+          <div id="line-article-selected" class="text-muted" style="font-size:12px;margin-top:4px"></div>
         </div>
         <div class="field"><label>Beskrivning *</label><input type="text" name="description" required id="line-desc"></div>
         <div class="form-row">
@@ -1339,19 +1341,45 @@ function openAddLineForm(orderId, articles, onSaved) {
       </form>
     `,
   });
-  document.getElementById('line-article-select').addEventListener('change', (e) => {
-    const opt = e.target.selectedOptions[0];
-    if (opt.value) {
-      document.getElementById('line-desc').value = opt.dataset.name;
-      document.getElementById('line-price').value = opt.dataset.price;
-      document.querySelector('[name="unit"]').value = opt.dataset.unit || 'st';
-    }
+
+  const searchInput = document.getElementById('line-article-search');
+  const resultsBox = document.getElementById('line-article-results');
+  let searchTimer;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { resultsBox.innerHTML = ''; resultsBox.classList.remove('open'); return; }
+    searchTimer = setTimeout(async () => {
+      const matches = await api.get(`/articles?q=${encodeURIComponent(q)}&limit=25`);
+      resultsBox.classList.add('open');
+      resultsBox.innerHTML = matches.length
+        ? matches.map(a => `
+            <div class="pl-result-row" data-id="${a.id}">
+              <strong>${a.name}</strong>
+              <span class="text-muted">${a.article_number || ''} ${a.location ? '· ' + a.location : ''}</span>
+            </div>
+          `).join('')
+        : `<div class="pl-result-row text-muted">Inga träffar</div>`;
+      resultsBox.querySelectorAll('[data-id]').forEach(row => {
+        row.addEventListener('click', () => {
+          const a = matches.find(x => x.id === parseInt(row.dataset.id));
+          selectedArticle = a;
+          document.getElementById('line-desc').value = a.name;
+          document.getElementById('line-price').value = a.price || 0;
+          document.querySelector('[name="unit"]').value = a.unit || 'st';
+          document.getElementById('line-article-selected').textContent = `Vald: ${a.name} (${a.article_number || '–'})`;
+          searchInput.value = '';
+          resultsBox.innerHTML = '';
+          resultsBox.classList.remove('open');
+        });
+      });
+    }, 250);
   });
+
   document.getElementById('add-line-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target));
-    const artSel = document.getElementById('line-article-select');
-    body.article_id = artSel.value ? Number(artSel.value) : null;
+    body.article_id = selectedArticle ? selectedArticle.id : null;
     body.quantity = parseFloat(body.quantity);
     body.unit_price = parseFloat(body.unit_price);
     try {

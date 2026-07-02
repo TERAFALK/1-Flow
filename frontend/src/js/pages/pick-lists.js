@@ -74,10 +74,7 @@ export async function renderPickLists(el) {
 }
 
 async function openPickListBuilder(onSaved, existingId = null) {
-  const [allArticles, existing] = await Promise.all([
-    api.get('/articles'),
-    existingId ? api.get(`/pick-lists/${existingId}`) : Promise.resolve(null),
-  ]);
+  const existing = existingId ? await api.get(`/pick-lists/${existingId}`) : null;
 
   const selected = new Map(); // article_id (or 'manual-N') -> { article_id, description, quantity, unit, location }
   if (existing) {
@@ -153,37 +150,36 @@ async function openPickListBuilder(onSaved, existingId = null) {
 
   const searchInput = document.getElementById('pl-article-search');
   const resultsBox = document.getElementById('pl-article-results');
+  let searchTimer;
   searchInput.addEventListener('input', () => {
-    const q = searchInput.value.trim().toLowerCase();
-    if (!q) { resultsBox.innerHTML = ''; resultsBox.classList.remove('open'); return; }
-    const matches = allArticles.filter(a =>
-      a.name.toLowerCase().includes(q) ||
-      (a.article_number || '').toLowerCase().includes(q) ||
-      (a.location || '').toLowerCase().includes(q) ||
-      (a.supplier || '').toLowerCase().includes(q)
-    ).slice(0, 25);
-    resultsBox.classList.add('open');
-    resultsBox.innerHTML = matches.length
-      ? matches.map(a => `
-          <div class="pl-result-row" data-add="${a.id}">
-            <strong>${a.name}</strong>
-            <span class="text-muted">${a.article_number || ''} ${a.location ? '· ' + a.location : ''} ${a.supplier ? '· ' + a.supplier : ''}</span>
-          </div>
-        `).join('')
-      : `<div class="pl-result-row text-muted">Inga träffar</div>`;
-    resultsBox.querySelectorAll('[data-add]').forEach(row => {
-      row.addEventListener('click', () => {
-        const a = allArticles.find(x => x.id === parseInt(row.dataset.add));
-        const key = `a${a.id}`;
-        const cur = selected.get(key);
-        if (cur) cur.quantity += 1;
-        else selected.set(key, { article_id: a.id, description: a.name, quantity: 1, unit: a.unit, location: a.location });
-        renderSelected();
-        searchInput.value = '';
-        resultsBox.innerHTML = '';
-        resultsBox.classList.remove('open');
+    clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { resultsBox.innerHTML = ''; resultsBox.classList.remove('open'); return; }
+    searchTimer = setTimeout(async () => {
+      const matches = await api.get(`/articles?q=${encodeURIComponent(q)}&limit=25`);
+      resultsBox.classList.add('open');
+      resultsBox.innerHTML = matches.length
+        ? matches.map(a => `
+            <div class="pl-result-row" data-add="${a.id}">
+              <strong>${a.name}</strong>
+              <span class="text-muted">${a.article_number || ''} ${a.location ? '· ' + a.location : ''} ${a.supplier ? '· ' + a.supplier : ''}</span>
+            </div>
+          `).join('')
+        : `<div class="pl-result-row text-muted">Inga träffar</div>`;
+      resultsBox.querySelectorAll('[data-add]').forEach(row => {
+        row.addEventListener('click', () => {
+          const a = matches.find(x => x.id === parseInt(row.dataset.add));
+          const key = `a${a.id}`;
+          const cur = selected.get(key);
+          if (cur) cur.quantity += 1;
+          else selected.set(key, { article_id: a.id, description: a.name, quantity: 1, unit: a.unit, location: a.location });
+          renderSelected();
+          searchInput.value = '';
+          resultsBox.innerHTML = '';
+          resultsBox.classList.remove('open');
+        });
       });
-    });
+    }, 250);
   });
 
   document.getElementById('picklist-form').addEventListener('submit', async (e) => {
@@ -199,7 +195,6 @@ async function openPickListBuilder(onSaved, existingId = null) {
     try {
       if (existing) {
         await api.put(`/pick-lists/${existing.id}`, { title, notes: notes || null });
-        const currentLineIds = new Set(existing.lines.map(l => l.id));
         // simplest: delete all existing lines, re-add current selection
         await Promise.all(existing.lines.map(l => api.delete(`/pick-lists/${existing.id}/lines/${l.id}`)));
         await Promise.all(lines.map(l => api.post(`/pick-lists/${existing.id}/lines`, l)));

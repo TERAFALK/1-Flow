@@ -56,7 +56,7 @@ def update_customer(
     customer = db.get(models.Customer, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Kund ej hittad")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(customer, field, value)
     db.commit()
     db.refresh(customer)
@@ -72,5 +72,10 @@ def delete_customer(
     customer = db.get(models.Customer, customer_id)
     if not customer:
         raise HTTPException(status_code=404, detail="Kund ej hittad")
+    # customer_id är NOT NULL på arbetsordrar och fordon – ge tydligt fel istället för 500
+    if customer.work_orders:
+        raise HTTPException(status_code=400, detail="Kunden har arbetsordrar – ta bort dem först")
+    if customer.vehicles:
+        raise HTTPException(status_code=400, detail="Kunden har fordon – ta bort dem först")
     db.delete(customer)
     db.commit()

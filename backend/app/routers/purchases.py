@@ -70,7 +70,7 @@ def update_purchase(
     ).first()
     if not purchase:
         raise HTTPException(404, "Inköp ej hittat")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in body.model_dump(exclude_unset=True).items():
         setattr(purchase, k, v)
     db.commit()
     db.refresh(purchase)

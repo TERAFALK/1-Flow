@@ -46,7 +46,7 @@ def update_phase(
     ).first()
     if not phase:
         raise HTTPException(404, "Fas ej hittad")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in body.model_dump(exclude_unset=True).items():
         setattr(phase, k, v)
     db.commit()
     db.refresh(phase)

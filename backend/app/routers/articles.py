@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user
 from ..schemas import ArticleCreate, ArticleUpdate, ArticleOut, StockTransactionOut, ArticleImportResult
-from ..models import Article, StockTransaction, StockTransactionType, User
+from ..models import Article, StockTransaction, StockTransactionType, User, WorkOrderLine, PickListLine
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
 
@@ -149,7 +149,7 @@ def update_article(
     article = db.get(Article, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Artikel ej hittad")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(article, field, value)
     db.commit()
     db.refresh(article)
@@ -165,6 +165,15 @@ def delete_article(
     article = db.get(Article, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Artikel ej hittad")
+    # article_id är NOT NULL på stock_transactions och refereras från order-/plockrader
+    # utan cascade – städa referenserna innan artikeln tas bort
+    db.query(StockTransaction).filter(StockTransaction.article_id == article_id).delete(synchronize_session=False)
+    db.query(WorkOrderLine).filter(WorkOrderLine.article_id == article_id).update(
+        {WorkOrderLine.article_id: None}, synchronize_session=False
+    )
+    db.query(PickListLine).filter(PickListLine.article_id == article_id).update(
+        {PickListLine.article_id: None}, synchronize_session=False
+    )
     db.delete(article)
     db.commit()
 

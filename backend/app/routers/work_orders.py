@@ -150,7 +150,7 @@ def update_work_order(
     wo = db.get(WorkOrder, order_id)
     if not wo:
         raise HTTPException(status_code=404, detail="Arbetsorder ej hittad")
-    data = body.model_dump(exclude_none=True)
+    data = body.model_dump(exclude_unset=True)
     if "status" in data:
         if data["status"] == WorkOrderStatus.pagaende and not wo.started_at:
             wo.started_at = datetime.utcnow()
@@ -171,6 +171,10 @@ def delete_work_order(
     wo = db.get(WorkOrder, order_id)
     if not wo:
         raise HTTPException(status_code=404, detail="Arbetsorder ej hittad")
+    # Lagertransaktioner refererar ordern utan cascade – behåll historiken men släpp kopplingen
+    db.query(StockTransaction).filter(StockTransaction.work_order_id == order_id).update(
+        {StockTransaction.work_order_id: None}, synchronize_session=False
+    )
     db.delete(wo)
     db.commit()
 
@@ -225,7 +229,7 @@ def update_line(
     ).first()
     if not line:
         raise HTTPException(status_code=404, detail="Rad ej hittad")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(line, field, value)
     db.commit()
     return (

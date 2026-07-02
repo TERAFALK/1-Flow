@@ -535,9 +535,11 @@ async function loadDetail(el, id) {
 // ── Timer section ─────────────────────────────────────────────────────────────
 
 async function loadTimerSection(orderId) {
-  const section = document.getElementById('timer-section');
+  let section = document.getElementById('timer-section');
   if (!section) return;
   const active = await api.get('/time-entries/active').catch(() => null);
+  section = document.getElementById('timer-section');
+  if (!section) return; // page was navigated away from while this request was in flight
   if (active && active.work_order_id == orderId) {
     const start = new Date(active.start_time + 'Z');
     section.innerHTML = `
@@ -575,7 +577,7 @@ async function loadTimerSection(orderId) {
         </div>
       </div>
     `;
-    document.getElementById('start-timer-inline').addEventListener('submit', async (e) => {
+    document.getElementById('start-timer-inline')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const { entry_type } = Object.fromEntries(new FormData(e.target));
       try {

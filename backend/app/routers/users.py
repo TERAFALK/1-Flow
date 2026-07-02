@@ -65,9 +65,10 @@ def update_user(
     user = db.get(models.User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Användare ej hittad")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         if field == "password":
-            user.hashed_password = hash_password(value)
+            if value:
+                user.hashed_password = hash_password(value)
         else:
             setattr(user, field, value)
     db.commit()
@@ -86,5 +87,22 @@ def delete_user(
     user = db.get(models.User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Användare ej hittad")
+    if db.query(models.TimeEntry).filter(models.TimeEntry.user_id == user_id).first():
+        raise HTTPException(
+            status_code=400,
+            detail="Användaren har registrerad tid och kan inte tas bort – avaktivera kontot istället",
+        )
+    # Släpp alla nullbara referenser till användaren innan borttagning
+    for model, col in (
+        (models.WorkOrder, models.WorkOrder.assigned_to),
+        (models.WorkOrder, models.WorkOrder.created_by),
+        (models.StockTransaction, models.StockTransaction.user_id),
+        (models.Task, models.Task.assigned_to),
+        (models.Task, models.Task.created_by),
+        (models.Activity, models.Activity.created_by),
+        (models.WorkOrderFile, models.WorkOrderFile.uploaded_by),
+        (models.PickList, models.PickList.created_by),
+    ):
+        db.query(model).filter(col == user_id).update({col: None}, synchronize_session=False)
     db.delete(user)
     db.commit()

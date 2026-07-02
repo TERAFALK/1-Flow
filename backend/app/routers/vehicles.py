@@ -66,7 +66,7 @@ def update_vehicle(
     vehicle = db.get(models.Vehicle, vehicle_id)
     if not vehicle:
         raise HTTPException(status_code=404, detail="Fordon ej hittad")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(vehicle, field, value)
     db.commit()
     db.refresh(vehicle)

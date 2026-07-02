@@ -67,7 +67,7 @@ def get_pick_list(pick_list_id: int, db: Session = Depends(get_db), _: User = De
 @router.put("/{pick_list_id}", response_model=PickListOut)
 def update_pick_list(pick_list_id: int, body: PickListUpdate, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     pl = _get(db, pick_list_id)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(pl, field, value)
     db.commit()
     return _out(_get(db, pick_list_id))
@@ -99,7 +99,7 @@ def update_line(pick_list_id: int, line_id: int, body: PickListLineUpdate, db: S
     line = db.query(PickListLine).filter(PickListLine.id == line_id, PickListLine.pick_list_id == pick_list_id).first()
     if not line:
         raise HTTPException(status_code=404, detail="Rad ej hittad")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(line, field, value)
     db.commit()
     line = db.query(PickListLine).options(joinedload(PickListLine.article)).get(line_id)

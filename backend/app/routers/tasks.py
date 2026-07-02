@@ -51,7 +51,7 @@ def update_task(
     task = db.query(Task).filter(Task.id == task_id, Task.work_order_id == order_id).first()
     if not task:
         raise HTTPException(404, "Uppgift ej hittad")
-    data = body.model_dump(exclude_none=True)
+    data = body.model_dump(exclude_unset=True)
     if "completed" in data:
         task.completed_at = datetime.utcnow() if data["completed"] else None
     for k, v in data.items():

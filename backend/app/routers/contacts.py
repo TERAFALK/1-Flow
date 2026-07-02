@@ -53,7 +53,7 @@ def update_contact(
     ).first()
     if not contact:
         raise HTTPException(404, "Kontaktperson ej hittad")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in body.model_dump(exclude_unset=True).items():
         setattr(contact, k, v)
     db.commit()
     db.refresh(contact)

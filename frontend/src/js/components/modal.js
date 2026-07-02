@@ -1,6 +1,9 @@
 const overlay = () => document.getElementById('modal-overlay');
 const box = () => document.getElementById('modal-box');
 
+function onEscape(e) { if (e.key === 'Escape') closeModal(); }
+function onOverlayClick(e) { if (e.target === overlay()) closeModal(); }
+
 export function openModal({ title, body, size = '', onClose } = {}) {
   const b = box();
   b.className = `modal-box ${size}`;
@@ -18,20 +21,24 @@ export function openModal({ title, body, size = '', onClose } = {}) {
   }
   overlay().classList.remove('hidden');
 
-  const close = () => closeModal();
-  document.getElementById('modal-close-btn').addEventListener('click', close);
-  overlay().addEventListener('click', (e) => { if (e.target === overlay()) close(); }, { once: true });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); }, { once: true });
+  document.getElementById('modal-close-btn').addEventListener('click', () => closeModal());
+  // Named handlers: addEventListener dedupes same function reference, so
+  // repeated openModal calls never stack listeners, and closeModal can remove them.
+  overlay().addEventListener('click', onOverlayClick);
+  document.addEventListener('keydown', onEscape);
 
-  if (onClose) overlay()._onClose = onClose;
+  overlay()._onClose = onClose || null;
 }
 
 export function closeModal() {
   const o = overlay();
+  if (o.classList.contains('hidden')) return;
   const cb = o._onClose;
+  o._onClose = null;
   o.classList.add('hidden');
   box().innerHTML = '';
-  o._onClose = null;
+  o.removeEventListener('click', onOverlayClick);
+  document.removeEventListener('keydown', onEscape);
   if (cb) cb();
 }
 
@@ -52,7 +59,9 @@ export function confirmDialog(message) {
       `,
       onClose: () => resolve(false),
     });
-    document.getElementById('confirm-yes').addEventListener('click', () => { closeModal(); resolve(true); });
-    document.getElementById('confirm-no').addEventListener('click', () => { closeModal(); resolve(false); });
+    // resolve(true) måste ske FÖRE closeModal – closeModal kör onClose som
+    // annars hinner resolva false först (ett promise kan bara avgöras en gång).
+    document.getElementById('confirm-yes').addEventListener('click', () => { resolve(true); closeModal(); });
+    document.getElementById('confirm-no').addEventListener('click', () => closeModal());
   });
 }

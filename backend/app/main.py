@@ -181,7 +181,8 @@ def import_articles_from_csv():
         return
     db: Session = next(get_db())
     try:
-        if db.query(models.Article).count() > 0:
+        flag_key = "articles_csv_imported"
+        if db.get(models.Settings, flag_key):
             return
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -201,6 +202,8 @@ def import_articles_from_csv():
             if batch:
                 db.bulk_save_objects(batch)
                 db.commit()
+        db.add(models.Settings(key=flag_key, value="1"))
+        db.commit()
         print("Artiklar importerade från articles_import.csv")
     finally:
         db.close()

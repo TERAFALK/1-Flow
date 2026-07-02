@@ -47,6 +47,7 @@ def _run_migrations():
         )""",
         # purchases – need enum type first
         "DO $$ BEGIN CREATE TYPE purchasestatus AS ENUM ('beställd','inlevererad','avbeställd'); EXCEPTION WHEN duplicate_object THEN null; END $$",
+        "ALTER TYPE purchasestatus ADD VALUE IF NOT EXISTS 'ej_beställd' BEFORE 'beställd'",
         """CREATE TABLE IF NOT EXISTS purchases (
             id SERIAL PRIMARY KEY,
             work_order_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,

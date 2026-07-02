@@ -17,7 +17,7 @@ def list_time_entries(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(TimeEntry).options(joinedload(TimeEntry.user))
+    query = db.query(TimeEntry).options(joinedload(TimeEntry.user), joinedload(TimeEntry.work_order))
     if work_order_id:
         query = query.filter(TimeEntry.work_order_id == work_order_id)
     if user_id:
@@ -55,7 +55,7 @@ def start_timer(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return db.query(TimeEntry).options(joinedload(TimeEntry.user)).get(entry.id)
+    return db.query(TimeEntry).options(joinedload(TimeEntry.user), joinedload(TimeEntry.work_order)).get(entry.id)
 
 
 @router.post("/manual", response_model=TimeEntryOut, status_code=status.HTTP_201_CREATED)
@@ -81,7 +81,7 @@ def create_manual_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return db.query(TimeEntry).options(joinedload(TimeEntry.user)).get(entry.id)
+    return db.query(TimeEntry).options(joinedload(TimeEntry.user), joinedload(TimeEntry.work_order)).get(entry.id)
 
 
 @router.post("/{entry_id}/stop", response_model=TimeEntryOut)
@@ -108,7 +108,7 @@ def stop_timer(
         entry.entry_type = body.entry_type
     db.commit()
     db.refresh(entry)
-    return db.query(TimeEntry).options(joinedload(TimeEntry.user)).get(entry.id)
+    return db.query(TimeEntry).options(joinedload(TimeEntry.user), joinedload(TimeEntry.work_order)).get(entry.id)
 
 
 @router.get("/active", response_model=Optional[TimeEntryOut])
@@ -116,7 +116,7 @@ def get_active_timer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    entry = db.query(TimeEntry).options(joinedload(TimeEntry.user)).filter(
+    entry = db.query(TimeEntry).options(joinedload(TimeEntry.user), joinedload(TimeEntry.work_order)).filter(
         TimeEntry.user_id == current_user.id,
         TimeEntry.end_time.is_(None),
     ).first()

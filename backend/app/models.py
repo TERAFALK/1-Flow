@@ -37,6 +37,9 @@ class StockTransactionType(str, PyEnum):
 
 
 class PurchaseStatus(str, PyEnum):
+    # OBS: SQLAlchemy lagrar medlemmens NAMN i Postgres-enumen `purchasestatus`,
+    # så nya medlemmar kräver ALTER TYPE-migration i main.py
+    ej_beställd = "ej beställd"
     beställd = "beställd"
     inlevererad = "inlevererad"
     avbeställd = "avbeställd"

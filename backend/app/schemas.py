@@ -254,6 +254,12 @@ class TimeEntryManual(BaseModel):
     description: Optional[str] = None
 
 
+class TimeEntryWorkOrderRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    order_number: str
+
+
 class TimeEntryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -266,6 +272,7 @@ class TimeEntryOut(BaseModel):
     entry_type: TimeEntryType
     created_at: datetime
     user: Optional[UserOut] = None
+    work_order: Optional[TimeEntryWorkOrderRef] = None
 
 
 # ── Work Order Phases (Gantt) ─────────────────────────────────────────────────

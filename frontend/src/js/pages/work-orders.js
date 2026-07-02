@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { api, downloadFile } from '../api.js';
 import { statusBadge, fmtDate, fmtDuration } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
@@ -378,6 +378,10 @@ async function loadDetail(el, id) {
     <div id="tab-purchases" class="hidden">
       <div style="display:flex;gap:8px;margin-bottom:16px">
         <button class="btn btn-secondary" id="add-purchase-btn">+ Nytt inköp</button>
+        <button class="btn btn-ghost" id="print-purchases-btn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
+          Ladda ner PDF
+        </button>
       </div>
       <div id="purchases-content"><div class="loading">Laddar…</div></div>
     </div>
@@ -471,6 +475,11 @@ async function loadDetail(el, id) {
   document.getElementById('add-purchase-btn').addEventListener('click', () =>
     openPurchaseForm(id, null, users, () => loadPurchases(id, users))
   );
+  document.getElementById('print-purchases-btn').addEventListener('click', async () => {
+    try {
+      await downloadFile(`/work-orders/${id}/purchases/pdf`, `inkop-order-${id}.pdf`);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
 
   // ── Task button ─────────────────────────────────────────────────────────────
   document.getElementById('add-task-btn').addEventListener('click', () =>
@@ -780,11 +789,11 @@ async function loadPhases(orderId) {
                 <td>${p.end_date ? fmtDate(p.end_date) : '–'}</td>
                 <td>
                   <div style="display:flex;gap:4px">
-                    <button class="btn-icon" onclick="window._editPhase(${orderId}, ${p.id})">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    <button type="button" class="btn-icon" title="Redigera" onclick="window._editPhase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
                     </button>
-                    <button class="btn-icon" onclick="window._deletePhase(${orderId}, ${p.id})">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    <button type="button" class="btn-icon" title="Ta bort" onclick="window._deletePhase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                     </button>
                   </div>
                 </td>
@@ -846,7 +855,7 @@ function openPhaseForm(orderId, phase, onSaved) {
 
 // ── Purchases ─────────────────────────────────────────────────────────────────
 
-const PURCHASE_STATUS = { beställd: 'Beställd', inlevererad: 'Inlevererad', avbeställd: 'Avbeställd' };
+const PURCHASE_STATUS = { 'ej beställd': 'Ej beställd', beställd: 'Beställd', inlevererad: 'Inlevererad', avbeställd: 'Avbeställd' };
 
 async function loadPurchases(orderId, users) {
   const el = document.getElementById('purchases-content');
@@ -883,11 +892,11 @@ async function loadPurchases(orderId, users) {
                 </td>
                 <td>
                   <div style="display:flex;gap:4px">
-                    <button class="btn-icon" onclick="window._editPurchase(${orderId}, ${p.id})">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    <button type="button" class="btn-icon" title="Redigera" onclick="window._editPurchase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
                     </button>
-                    <button class="btn-icon" onclick="window._deletePurchase(${orderId}, ${p.id})">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    <button type="button" class="btn-icon" title="Ta bort" onclick="window._deletePurchase(${orderId}, ${p.id})">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                     </button>
                   </div>
                 </td>
@@ -1023,8 +1032,8 @@ async function loadFiles(orderId, fileType) {
                   <td class="text-muted">${fmtBytes(f.size_bytes)}</td>
                   <td class="text-muted">${fmtDate(f.uploaded_at)}</td>
                   <td>
-                    <button class="btn-icon" onclick="window._deleteFile(${orderId}, ${f.id}, '${fileType}')">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    <button type="button" class="btn-icon" title="Ta bort" onclick="window._deleteFile(${orderId}, ${f.id}, '${fileType}')">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                     </button>
                   </td>
                 </tr>
@@ -1182,8 +1191,8 @@ async function loadActivities(orderId) {
                 <strong>${ACTIVITY_TYPES[a.activity_type] || a.activity_type}</strong>
                 <span class="text-muted" style="font-size:12px">${fmtDate(a.created_at, true)}</span>
                 ${a.creator ? `<span class="text-muted" style="font-size:12px">• ${a.creator.full_name}</span>` : ''}
-                <button class="btn-icon" style="margin-left:auto" onclick="window._deleteActivity(${orderId}, ${a.id})">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                <button type="button" class="btn-icon" title="Ta bort" style="margin-left:auto" onclick="window._deleteActivity(${orderId}, ${a.id})">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                 </button>
               </div>
               <p style="margin:4px 0 0;color:var(--text-1)">${a.description}</p>
@@ -1241,8 +1250,8 @@ async function loadTasks(orderId, users) {
                 ${t.completed && t.completed_at ? `<span>Klar ${fmtDate(t.completed_at, true)}</span>` : ''}
               </div>
             </div>
-            <button class="btn-icon" onclick="window._deleteTask(${orderId}, ${t.id})">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            <button type="button" class="btn-icon" title="Ta bort" onclick="window._deleteTask(${orderId}, ${t.id})">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
             </button>
           </div>
         `).join('')}

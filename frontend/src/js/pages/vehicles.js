@@ -4,10 +4,11 @@ import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 
 export async function renderVehicles(el, params = {}) {
+  let allRows = [];
   const topbarActions = document.getElementById('topbar-actions');
   if (topbarActions) topbarActions.innerHTML = `
     <button class="btn btn-primary btn-sm" id="new-vehicle-btn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
       Nytt fordon
     </button>`;
 
@@ -17,7 +18,7 @@ export async function renderVehicles(el, params = {}) {
     <div class="card">
       <div class="card-header">
         <div class="search-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
           <input type="search" id="vehicle-search" placeholder="Sök reg.nr…">
         </div>
       </div>
@@ -39,6 +40,7 @@ export async function renderVehicles(el, params = {}) {
     const list = document.getElementById('vehicle-list');
     if (!list) return;
     const vehicles = await api.get(`/vehicles${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+    allRows = vehicles;
     if (!vehicles.length) {
       list.innerHTML = `<div class="empty-state"><p>Inga fordon hittade</p></div>`;
       return;
@@ -57,11 +59,11 @@ export async function renderVehicles(el, params = {}) {
                 <td>${v.odometer ? v.odometer.toLocaleString('sv-SE') + ' km' : '–'}</td>
                 <td onclick="event.stopPropagation()">
                   <div class="flex gap-2">
-                    <button class="btn-icon" title="Redigera" onclick="window._editVehicle(${v.id})">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    <button type="button" class="btn-icon" title="Redigera" onclick="window._editVehicle(${v.id})">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
                     </button>
-                    <button class="btn-icon" title="Ta bort" onclick="window._deleteVehicle(${v.id}, '${v.license_plate}')">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    <button type="button" class="btn-icon" title="Ta bort" onclick="window._deleteVehicle(${v.id})">
+                      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                     </button>
                   </div>
                 </td>
@@ -79,11 +81,15 @@ export async function renderVehicles(el, params = {}) {
     const v = await api.get(`/vehicles/${id}`);
     openVehicleForm(v, null, reload);
   };
-  window._deleteVehicle = async (id, plate) => {
+  window._deleteVehicle = async (id) => {
+    const v = allRows.find(x => x.id === id);
+    const plate = (v?.license_plate || 'fordonet').replace(/</g, '&lt;');
     if (await confirmDialog(`Ta bort fordonet <strong>${plate}</strong>?`)) {
-      await api.delete(`/vehicles/${id}`);
-      showToast('Fordon borttaget', 'success');
-      reload();
+      try {
+        await api.delete(`/vehicles/${id}`);
+        showToast('Fordon borttaget', 'success');
+        reload();
+      } catch (err) { showToast(err.message, 'error'); }
     }
   };
 

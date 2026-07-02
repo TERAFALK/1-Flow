@@ -71,7 +71,7 @@ export async function renderTimeEntries(el) {
           <tbody>
             ${entries.length ? entries.map(e => `
               <tr>
-                <td><a href="#/work-orders/${e.work_order_id}"><strong>${e.work_order_id}</strong></a></td>
+                <td><a href="#/work-orders/${e.work_order_id}"><strong>${e.work_order?.order_number || '#' + e.work_order_id}</strong></a></td>
                 <td>${e.user?.full_name || '–'}</td>
                 <td>${e.entry_type}</td>
                 <td>${fmtDate(e.start_time, true)}</td>

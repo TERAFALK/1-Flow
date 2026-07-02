@@ -39,6 +39,7 @@ export async function uploadFile(url, formData) {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
   });
+  if (res.status === 413) throw new Error('Filen är för stor för servern (öka client_max_body_size i proxyn)');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
   return data;

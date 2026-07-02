@@ -46,7 +46,7 @@ export function modalBody() {
   return box().querySelector('.modal-body');
 }
 
-export function confirmDialog(message) {
+export function confirmDialog(message, confirmLabel = 'Ta bort') {
   return new Promise((resolve) => {
     openModal({
       title: 'Bekräfta',
@@ -54,7 +54,7 @@ export function confirmDialog(message) {
         <p style="margin-bottom:20px">${message}</p>
         <div class="modal-footer" style="padding:0;border:none">
           <button class="btn btn-secondary" id="confirm-no">Avbryt</button>
-          <button class="btn btn-danger" id="confirm-yes">Ta bort</button>
+          <button class="btn btn-danger" id="confirm-yes">${confirmLabel}</button>
         </div>
       `,
       onClose: () => resolve(false),

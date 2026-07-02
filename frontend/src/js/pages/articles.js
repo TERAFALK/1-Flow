@@ -43,7 +43,7 @@ export async function renderArticles(el) {
   importInput.addEventListener('change', async () => {
     const file = importInput.files[0];
     if (!file) return;
-    const ok = await confirmDialog(`Detta skriver <strong>över hela artikellagret</strong> med innehållet i <strong>${file.name}</strong>. Alla befintliga artiklar tas bort och ersätts. Fortsätta?`);
+    const ok = await confirmDialog(`Detta skriver <strong>över hela artikellagret</strong> med innehållet i <strong>${file.name}</strong>. Alla befintliga artiklar tas bort och ersätts. Fortsätta?`, 'Importera');
     importInput.value = '';
     if (!ok) return;
     const btn = document.getElementById('import-excel-btn');

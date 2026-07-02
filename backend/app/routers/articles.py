@@ -32,6 +32,25 @@ def list_articles(
     return query.order_by(Article.name).offset(offset).limit(limit).all()
 
 
+def _wipe_articles(db: Session):
+    raw_conn = db.connection().connection
+    cur = raw_conn.cursor()
+    cur.execute("UPDATE work_order_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
+    cur.execute("UPDATE pick_list_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
+    cur.execute("DELETE FROM stock_transactions")
+    cur.execute("DELETE FROM articles")
+    raw_conn.commit()
+    cur.close()
+
+
+@router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
+def clear_all_articles(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    _wipe_articles(db)
+
+
 @router.post("/import-excel", response_model=ArticleImportResult)
 async def import_excel(
     file: UploadFile = File(...),
@@ -61,9 +80,10 @@ async def import_excel(
         if not code or not name:
             continue
         code = str(code).strip()
-        if code in seen:
+        dedup_key = code.upper()
+        if dedup_key in seen:
             continue
-        seen.add(code)
+        seen.add(dedup_key)
         clean = lambda v: (str(v).strip() if v else "").replace("\t", " ").replace("\r", " ").replace("\n", " ").replace('"', "'")
         rows_out.append((clean(code), clean(name) or "Okänd artikel", clean(company), clean(location)))
 
@@ -82,10 +102,7 @@ async def import_excel(
         "COPY _articles_stage (article_number, name, supplier, location) FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '')",
         buf,
     )
-    cur.execute("UPDATE work_order_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
-    cur.execute("UPDATE pick_list_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
-    cur.execute("DELETE FROM stock_transactions")
-    cur.execute("DELETE FROM articles")
+    _wipe_articles(db)
     cur.execute("""
         INSERT INTO articles (article_number, name, supplier, location, unit, price, stock_quantity, min_stock, created_at)
         SELECT NULLIF(article_number, ''), name, NULLIF(supplier, ''), NULLIF(location, ''), 'st', 0, 0, 0, NOW()

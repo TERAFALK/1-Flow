@@ -15,6 +15,7 @@ export async function renderArticles(el) {
         <div class="page-subtitle">Artikelregister</div>
       </div>
       <div class="flex gap-2">
+        <button class="btn btn-ghost btn-danger" id="clear-stock-btn">Rensa lager</button>
         <button class="btn btn-secondary" id="import-excel-btn">Importera Excel</button>
         <input type="file" id="import-excel-input" accept=".xlsx,.xls" class="hidden">
         <button class="btn btn-primary" id="new-article-btn">
@@ -60,6 +61,16 @@ export async function renderArticles(el) {
       btn.disabled = false;
       btn.textContent = 'Importera Excel';
     }
+  });
+
+  document.getElementById('clear-stock-btn').addEventListener('click', async () => {
+    const ok = await confirmDialog('Detta tar bort <strong>alla artiklar</strong> i lagret permanent. Är du säker?');
+    if (!ok) return;
+    try {
+      await api.delete('/articles/all');
+      showToast('Lagret rensat', 'success');
+      reload();
+    } catch (err) { showToast(err.message, 'error'); }
   });
 
   let timer;

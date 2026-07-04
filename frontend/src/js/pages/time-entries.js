@@ -5,9 +5,8 @@ import { showToast } from '../components/toast.js';
 
 export async function renderTimeEntries(el) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
-  const [entries, active, orders] = await Promise.all([
+  const [entries, orders] = await Promise.all([
     api.get('/time-entries'),
-    api.get('/time-entries/active'),
     api.get('/work-orders'),
   ]);
 
@@ -16,56 +15,15 @@ export async function renderTimeEntries(el) {
   el.innerHTML = `
     <div class="page-header">
       <div class="page-title">Tidrapportering</div>
+      <button class="btn btn-primary" id="add-manual-time-btn">+ Manuell tidpost</button>
     </div>
-
-    ${active ? `
-      <div class="timer-card" id="active-timer-card">
-        <div class="timer-label">Aktiv tidmätning – ${active.work_order?.order_number || 'AO-?'}</div>
-        <div class="timer-display" id="live-clock">00:00:00</div>
-        <div style="color:rgba(255,255,255,.7);font-size:13px;margin-top:4px;margin-bottom:16px">
-          Startad ${fmtDate(active.start_time, true)}
-        </div>
-        <button class="btn btn-danger" id="stop-timer-btn">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="16"><rect x="4" y="4" width="12" height="12" rx="1"/></svg>
-          Stoppa tidmätning
-        </button>
-      </div>
-    ` : `
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-header"><span class="card-title">Starta tidmätning</span></div>
-        <div class="card-body">
-          <form id="start-timer-form" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-            <div class="field" style="margin:0;flex:1;min-width:200px">
-              <label>Arbetsorder</label>
-              <select name="work_order_id" required>
-                <option value="">Välj order…</option>
-                ${openOrders.map(o => `<option value="${o.id}">${o.order_number} – ${o.customer?.name || ''} ${o.vehicle?.license_plate || ''}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field" style="margin:0;flex:1;min-width:160px">
-              <label>Typ av arbete</label>
-              <select name="entry_type">
-                <option value="övrigt">Övrigt</option>
-                <option value="felsökning">Felsökning</option>
-                <option value="reparation">Reparation</option>
-                <option value="provkörning">Provkörning</option>
-              </select>
-            </div>
-            <button type="submit" class="btn btn-success" style="margin-bottom:16px">
-              <svg viewBox="0 0 20 20" fill="currentColor" width="16"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-              Starta
-            </button>
-          </form>
-        </div>
-      </div>
-    `}
 
     <div class="card">
       <div class="card-header"><span class="card-title">Tidposter</span></div>
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Order</th><th>Mekaniker</th><th>Typ</th>
+            <th>Order</th><th>Tekniker</th><th>Typ</th>
             <th>Start</th><th>Stopp</th><th>Tid</th><th></th>
           </tr></thead>
           <tbody>
@@ -90,43 +48,9 @@ export async function renderTimeEntries(el) {
     </div>
   `;
 
-  // Live clock for active timer
-  if (active) {
-    const start = new Date(active.start_time + 'Z');
-    const tick = () => {
-      const el = document.getElementById('live-clock');
-      if (!el) return;
-      const diff = Math.floor((Date.now() - start.getTime()) / 1000);
-      const h = Math.floor(diff / 3600).toString().padStart(2, '0');
-      const m = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
-      const s = (diff % 60).toString().padStart(2, '0');
-      el.textContent = `${h}:${m}:${s}`;
-    };
-    tick();
-    const iv = setInterval(tick, 1000);
-    window._timerInterval = iv;
-
-    document.getElementById('stop-timer-btn').addEventListener('click', async () => {
-      clearInterval(iv);
-      await api.post(`/time-entries/${active.id}/stop`, {});
-      showToast('Tidmätning stoppad', 'success');
-      renderTimeEntries(el);
-    });
-  }
-
-  const startForm = document.getElementById('start-timer-form');
-  if (startForm) {
-    startForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const data = Object.fromEntries(new FormData(e.target));
-      data.work_order_id = Number(data.work_order_id);
-      try {
-        await api.post('/time-entries/start', data);
-        showToast('Tidmätning startad', 'success');
-        renderTimeEntries(el);
-      } catch (err) { showToast(err.message, 'error'); }
-    });
-  }
+  document.getElementById('add-manual-time-btn').addEventListener('click', () =>
+    openManualTimeForm(openOrders, () => renderTimeEntries(el))
+  );
 
   window._deleteEntry = async (id) => {
     if (await confirmDialog('Ta bort denna tidpost?')) {
@@ -135,4 +59,60 @@ export async function renderTimeEntries(el) {
       renderTimeEntries(el);
     }
   };
+}
+
+function openManualTimeForm(orders, onSaved) {
+  const now = new Date();
+  const toLocal = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const defaultStart = toLocal(new Date(now.getTime() - 60 * 60000));
+  const defaultEnd = toLocal(now);
+
+  openModal({
+    title: 'Lägg till manuell tidpost',
+    body: `
+      <form id="manual-time-form">
+        <div class="field">
+          <label>Arbetsorder *</label>
+          <select name="work_order_id" required>
+            <option value="">Välj order…</option>
+            ${orders.map(o => `<option value="${o.id}">${o.order_number} – ${o.customer?.name || ''} ${o.vehicle?.license_plate || ''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Starttid *</label><input type="datetime-local" name="start_time" value="${defaultStart}" required></div>
+          <div class="field"><label>Sluttid *</label><input type="datetime-local" name="end_time" value="${defaultEnd}" required></div>
+        </div>
+        <div class="field">
+          <label>Typ av arbete</label>
+          <select name="entry_type">
+            <option value="övrigt">Övrigt</option>
+            <option value="felsökning">Felsökning</option>
+            <option value="reparation">Reparation</option>
+            <option value="provkörning">Provkörning</option>
+          </select>
+        </div>
+        <div class="field"><label>Beskrivning</label><input type="text" name="description" placeholder="Valfri anteckning"></div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">Spara</button>
+        </div>
+      </form>
+    `,
+  });
+  document.getElementById('manual-time-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.target));
+    try {
+      await api.post('/time-entries/manual', {
+        work_order_id: Number(data.work_order_id),
+        start_time: new Date(data.start_time).toISOString(),
+        end_time: new Date(data.end_time).toISOString(),
+        entry_type: data.entry_type,
+        description: data.description || null,
+      });
+      showToast('Tidpost tillagd', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
 }

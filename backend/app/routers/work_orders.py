@@ -1,10 +1,17 @@
+import io
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
 from ..database import get_db
 from ..deps import get_current_user
+from ..pdf_utils import draw_header
 from ..schemas import (
     WorkOrderCreate, WorkOrderUpdate, WorkOrderOut, WorkOrderListItem,
     WorkOrderLineCreate, WorkOrderLineUpdate, WorkOrderLineOut, ScanResult,
@@ -20,6 +27,7 @@ _WO_LOAD = [
     joinedload(WorkOrder.customer),
     joinedload(WorkOrder.vehicle).joinedload(Vehicle.customer),
     joinedload(WorkOrder.assigned_to_user),
+    joinedload(WorkOrder.contact_person),
     joinedload(WorkOrder.lines).joinedload(WorkOrderLine.article),
     joinedload(WorkOrder.time_entries).joinedload(TimeEntry.user),
 ]
@@ -348,54 +356,129 @@ def scan_article(
         )
 
 
-# ── Invoice basis ─────────────────────────────────────────────────────────────
+# ── Invoice basis (PDF) ───────────────────────────────────────────────────────
+
+def _fmt_minutes(minutes: int) -> str:
+    h, m = divmod(int(minutes or 0), 60)
+    if h and m:
+        return f"{h} h {m} min"
+    if h:
+        return f"{h} h"
+    return f"{m} min"
+
 
 @router.get("/{order_id}/invoice")
-def invoice_basis(
+def invoice_pdf(
     order_id: int,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     wo = _get_wo(db, order_id)
-    lines = [
-        {
-            "id": l.id,
-            "description": l.description,
-            "quantity": float(l.quantity),
-            "unit": l.unit,
-            "unit_price": float(l.unit_price),
-            "total": float(l.quantity * l.unit_price),
-            "article_number": l.article.article_number if l.article else None,
-        }
-        for l in wo.lines
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    page_w, page_h = A4
+    margin = 18 * mm
+
+    subtitle = wo.order_number + (f" – {wo.customer.name}" if wo.customer else "")
+    y = draw_header(c, page_w, "Fakturaunderlag", subtitle)
+
+    # ── Meta block ──
+    c.setFont("Helvetica", 9)
+    c.setFillColor(colors.HexColor("#444444"))
+    veh = ""
+    if wo.vehicle:
+        veh = f"{wo.vehicle.license_plate} {wo.vehicle.make or ''} {wo.vehicle.model or ''}".strip()
+    meta = [
+        ("Kund", wo.customer.name if wo.customer else "–"),
+        ("Kontakt", wo.contact_person.name if wo.contact_person else "–"),
+        ("Fordon", veh or "–"),
+        ("Ärende", (wo.description or "")[:110]),
     ]
-    total_minutes = sum(
-        (e.duration_minutes or 0) for e in wo.time_entries if e.end_time
+    for label, value in meta:
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(margin, y, f"{label}:")
+        c.setFont("Helvetica", 9)
+        c.drawString(margin + 24 * mm, y, str(value))
+        y -= 13
+    c.setFillColor(colors.black)
+    y -= 8
+
+    def section_title(yy, text):
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(margin, yy, text)
+        return yy - 6
+
+    def table_header(yy, cols):
+        c.setFont("Helvetica-Bold", 9)
+        c.setFillColor(colors.HexColor("#1a1a1a"))
+        c.rect(margin, yy - 14, page_w - 2 * margin, 16, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        for x, label in cols:
+            c.drawString(x, yy - 10, label)
+        c.setFillColor(colors.black)
+        return yy - 18
+
+    def page_break_if_needed(yy):
+        if yy < 30 * mm:
+            c.showPage()
+            yy = draw_header(c, page_w, "Fakturaunderlag", subtitle) - 6
+        return yy
+
+    # ── Reservdelar ──
+    y = section_title(y, "Reservdelar")
+    cols = [(margin + 2, "Artikel"), (margin + 95 * mm, "Art.nr"), (page_w - margin - 30 * mm, "Antal")]
+    y = table_header(y, cols)
+    c.setFont("Helvetica", 8.5)
+    if not wo.lines:
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawString(margin + 2, y - 8, "Inga reservdelar")
+        c.setFillColor(colors.black)
+        y -= 16
+    for l in wo.lines:
+        y = page_break_if_needed(y)
+        c.drawString(margin + 2, y - 8, (l.description or "")[:60])
+        c.drawString(margin + 95 * mm, y - 8, (l.article.article_number if l.article else "") or "–")
+        c.drawRightString(page_w - margin - 4, y - 8, f"{float(l.quantity):g} {l.unit}")
+        c.setStrokeColor(colors.HexColor("#dddddd"))
+        c.line(margin, y - 12, page_w - margin, y - 12)
+        c.setStrokeColor(colors.black)
+        y -= 16
+
+    y -= 12
+    y = page_break_if_needed(y)
+
+    # ── Arbetstid ──
+    y = section_title(y, "Arbetstid")
+    cols = [(margin + 2, "Tekniker"), (margin + 70 * mm, "Typ"), (page_w - margin - 30 * mm, "Tid")]
+    y = table_header(y, cols)
+    c.setFont("Helvetica", 8.5)
+    total_minutes = 0
+    done_entries = [e for e in wo.time_entries if e.end_time]
+    if not done_entries:
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawString(margin + 2, y - 8, "Ingen registrerad tid")
+        c.setFillColor(colors.black)
+        y -= 16
+    for e in done_entries:
+        y = page_break_if_needed(y)
+        total_minutes += e.duration_minutes or 0
+        c.drawString(margin + 2, y - 8, (e.user.full_name if e.user else "")[:40])
+        c.drawString(margin + 70 * mm, y - 8, e.entry_type.value if e.entry_type else "")
+        c.drawRightString(page_w - margin - 4, y - 8, _fmt_minutes(e.duration_minutes))
+        c.setStrokeColor(colors.HexColor("#dddddd"))
+        c.line(margin, y - 12, page_w - margin, y - 12)
+        c.setStrokeColor(colors.black)
+        y -= 16
+
+    c.setFont("Helvetica-Bold", 9.5)
+    c.drawString(margin + 2, y - 10, "Total tid")
+    c.drawRightString(page_w - margin - 4, y - 10, _fmt_minutes(total_minutes))
+
+    c.save()
+    buf.seek(0)
+    filename = f"fakturaunderlag-{wo.order_number}.pdf"
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-    parts_total = sum(l["total"] for l in lines)
-    return {
-        "order_number": wo.order_number,
-        "customer": {"id": wo.customer.id, "name": wo.customer.name} if wo.customer else None,
-        "vehicle": {
-            "license_plate": wo.vehicle.license_plate,
-            "make": wo.vehicle.make,
-            "model": wo.vehicle.model,
-        } if wo.vehicle else None,
-        "description": wo.description,
-        "lines": lines,
-        "parts_total": parts_total,
-        "labor_minutes": total_minutes,
-        "labor_hours": round(total_minutes / 60, 2),
-        "time_entries": [
-            {
-                "user": e.user.full_name if e.user else "",
-                "start": e.start_time.isoformat() if e.start_time else None,
-                "end": e.end_time.isoformat() if e.end_time else None,
-                "minutes": e.duration_minutes,
-                "description": e.description,
-                "type": e.entry_type.value if e.entry_type else "",
-            }
-            for e in wo.time_entries
-        ],
-        "status": wo.status.value,
-    }

@@ -3,12 +3,12 @@ import { statusBadge, fmtDate, fmtDuration } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 
-const STATUS_FLOW = {
-  ny:          { next: 'planerad',  label: 'Markera Planerad' },
-  planerad:    { next: 'pagaende',  label: 'Starta arbete' },
-  pagaende:    { next: 'klar',      label: 'Markera Klar' },
-  klar:        { next: 'fakturerad',label: 'Markera Fakturerad' },
-  fakturerad:  { next: null,        label: null },
+const WO_STATUS_LABELS = {
+  ny: 'Ny',
+  planerad: 'Planerad',
+  pagaende: 'Pågående',
+  klar: 'Klar',
+  fakturerad: 'Fakturerad',
 };
 
 // ── List ──────────────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ export async function renderWorkOrders(el, params = {}) {
           <thead><tr>
             <th>Order</th><th>Kund</th><th>Fordon</th>
             <th>Beskrivning</th><th>Tilldelad</th>
-            <th>Schemalagd</th><th>Status</th><th></th>
+            <th>Schemalagd</th><th>Status</th>
           </tr></thead>
           <tbody>
             ${orders.map(o => `
@@ -79,11 +79,6 @@ export async function renderWorkOrders(el, params = {}) {
                 <td>${o.assigned_to_user?.full_name || '–'}</td>
                 <td class="text-muted">${o.scheduled_date ? fmtDate(o.scheduled_date) : '–'}</td>
                 <td>${statusBadge(o.status)}</td>
-                <td>
-                  <button type="button" class="btn-icon" title="Ta bort order" data-delete-wo="${o.id}">
-                    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-                  </button>
-                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -92,17 +87,6 @@ export async function renderWorkOrders(el, params = {}) {
     `;
     list.querySelectorAll('[data-row]').forEach(row => {
       row.addEventListener('click', () => { location.hash = `#/work-orders/${row.dataset.row}`; });
-    });
-    list.querySelectorAll('[data-delete-wo]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const orderId = btn.dataset.deleteWo;
-        if (await confirmDialog('Ta bort denna arbetsorder permanent?')) {
-          await api.delete(`/work-orders/${orderId}`);
-          showToast('Arbetsorder borttagen', 'success');
-          reload();
-        }
-      });
     });
   }
   await reload();
@@ -154,10 +138,16 @@ export async function renderNewWorkOrder(el, params = {}) {
               </select>
             </div>
           </div>
+          <div class="field">
+            <label>Kontaktperson hos kund</label>
+            <select id="wo-contact" name="contact_person_id">
+              <option value="">Välj kund först…</option>
+            </select>
+          </div>
           <div class="field"><label>Beskrivning / Felbeskrivning *</label><textarea name="description" rows="3" required placeholder="Beskriv felet eller arbetet som ska utföras…"></textarea></div>
           <div class="form-row">
             <div class="field">
-              <label>Tilldelad mekaniker</label>
+              <label>Tilldelad tekniker</label>
               <select name="assigned_to">
                 <option value="">Ej tilldelad</option>
                 ${users.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}
@@ -180,6 +170,18 @@ export async function renderNewWorkOrder(el, params = {}) {
 
   const custSel = document.getElementById('wo-customer');
   const vehSel = document.getElementById('wo-vehicle');
+  const contactSel = document.getElementById('wo-contact');
+
+  async function loadContacts(cid) {
+    if (!cid) { contactSel.innerHTML = '<option value="">Välj kund först…</option>'; return; }
+    const contacts = await api.get(`/customers/${cid}/contacts`).catch(() => []);
+    contactSel.innerHTML = `<option value="">Ingen kontakt</option>` +
+      contacts.map(ct => `<option value="${ct.id}">${ct.name}${ct.title ? ' – ' + ct.title : ''}${ct.is_primary ? ' (primär)' : ''}</option>`).join('');
+    // Auto-select the primary contact if one exists
+    const primary = contacts.find(ct => ct.is_primary);
+    if (primary) contactSel.value = primary.id;
+  }
+
   custSel.addEventListener('change', () => {
     const cid = custSel.value;
     Array.from(vehSel.options).forEach(opt => {
@@ -187,6 +189,7 @@ export async function renderNewWorkOrder(el, params = {}) {
       opt.style.display = (!cid || opt.dataset.customer == cid) ? '' : 'none';
     });
     if (vehSel.selectedOptions[0]?.dataset.customer != cid) vehSel.value = '';
+    loadContacts(cid);
   });
   if (preCustomer) custSel.dispatchEvent(new Event('change'));
 
@@ -196,6 +199,7 @@ export async function renderNewWorkOrder(el, params = {}) {
     body.customer_id = Number(body.customer_id);
     body.vehicle_id = body.vehicle_id ? Number(body.vehicle_id) : null;
     body.assigned_to = body.assigned_to ? Number(body.assigned_to) : null;
+    body.contact_person_id = body.contact_person_id ? Number(body.contact_person_id) : null;
     if (!body.scheduled_date) body.scheduled_date = null;
     if (!body.internal_notes) body.internal_notes = null;
     if (!body.order_number) delete body.order_number;
@@ -220,8 +224,6 @@ async function loadDetail(el, id) {
     api.get('/users'),
   ]);
 
-  const flow = STATUS_FLOW[wo.status];
-  const totalParts = wo.lines.reduce((s, l) => s + parseFloat(l.quantity) * parseFloat(l.unit_price), 0);
   const totalMins = wo.time_entries.filter(e => e.end_time).reduce((s, e) => s + (e.duration_minutes || 0), 0);
 
   el.innerHTML = `
@@ -233,16 +235,20 @@ async function loadDetail(el, id) {
       <div>
         <div class="order-number">${wo.order_number}</div>
         <div class="order-desc">${wo.description}</div>
-        <div style="margin-top:8px">${statusBadge(wo.status)}</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          ${statusBadge(wo.status)}
+          <select class="wo-status-select" style="width:auto;min-width:140px;font-size:13px" onchange="window._setStatus(${wo.id}, this.value)">
+            ${Object.entries(WO_STATUS_LABELS).map(([s, label]) => `<option value="${s}" ${wo.status === s ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
+        </div>
       </div>
       <div class="order-actions">
-        ${flow?.next ? `<button class="btn btn-primary" onclick="window._advanceStatus('${wo.id}','${flow.next}')">${flow.label}</button>` : ''}
         <button class="btn btn-secondary" onclick="window._editWO(${wo.id})">Redigera</button>
         <a href="#/scanner?order=${wo.id}" class="btn btn-secondary">
           <svg viewBox="0 0 20 20" fill="currentColor" width="15"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 010 2H4v2a1 1 0 01-2 0V5a1 1 0 011-1zm9 0a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-2 0V4h-2a1 1 0 01-1-1zM3 16a1 1 0 011 1h2v-2a1 1 0 112 0v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3a1 1 0 011-1zm13 0a1 1 0 00-1 1v2h-2a1 1 0 100 2h3a1 1 0 001-1v-3a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
           Scanner
         </a>
-        <button class="btn btn-ghost" onclick="window._showInvoice(${wo.id})">Fakturaunderlag</button>
+        <button class="btn btn-ghost" onclick="window._downloadInvoice(${wo.id})">Fakturaunderlag (PDF)</button>
       </div>
     </div>
 
@@ -253,6 +259,7 @@ async function loadDetail(el, id) {
           <div class="meta-row"><span class="meta-label">Kund:</span>
             <strong><a href="#/customers/${wo.customer_id}">${wo.customer?.name || '–'}</a></strong>
           </div>
+          <div class="meta-row"><span class="meta-label">Kontakt:</span>${wo.contact_person ? `${wo.contact_person.name}${wo.contact_person.phone ? ' · ' + wo.contact_person.phone : ''}` : '–'}</div>
           <div class="meta-row"><span class="meta-label">Telefon:</span>${wo.customer?.phone || '–'}</div>
           <div class="meta-row"><span class="meta-label">E-post:</span>${wo.customer?.email || '–'}</div>
         </div>
@@ -309,18 +316,11 @@ async function loadDetail(el, id) {
           <table>
             <thead><tr>
               <th>Artikel</th><th>Art.nr</th><th class="text-right">Antal</th>
-              <th>Enhet</th><th class="text-right">À-pris</th><th class="text-right">Totalt</th><th></th>
+              <th>Enhet</th><th></th>
             </tr></thead>
             <tbody id="lines-tbody">
-              ${wo.lines.map(l => lineRow(l)).join('') || '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px">Inga reservdelar</td></tr>'}
+              ${wo.lines.map(l => lineRow(l)).join('') || '<tr><td colspan="5" class="text-muted" style="text-align:center;padding:24px">Inga reservdelar</td></tr>'}
             </tbody>
-            ${wo.lines.length ? `
-              <tfoot><tr class="total-row">
-                <td colspan="5">Summa reservdelar</td>
-                <td class="text-right">${fmtPrice(totalParts)}</td>
-                <td></td>
-              </tr></tfoot>
-            ` : ''}
           </table>
         </div>
       </div>
@@ -328,7 +328,6 @@ async function loadDetail(el, id) {
 
     <!-- TID -->
     <div id="tab-time" class="hidden">
-      <div id="timer-section" style="margin-bottom:16px"></div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button class="btn btn-secondary" id="add-manual-time-btn">+ Manuell tidpost</button>
       </div>
@@ -336,7 +335,7 @@ async function loadDetail(el, id) {
         <div class="card">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Mekaniker</th><th>Typ</th><th>Start</th><th>Stopp</th><th class="text-right">Tid</th><th></th></tr></thead>
+              <thead><tr><th>Tekniker</th><th>Typ</th><th>Start</th><th>Stopp</th><th class="text-right">Tid</th><th></th></tr></thead>
               <tbody id="time-entries-tbody">
                 ${wo.time_entries.map(e => timeEntryRow(e, id)).join('') || '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">Inga tidposter</td></tr>'}
               </tbody>
@@ -453,9 +452,6 @@ async function loadDetail(el, id) {
   // ── Gantt overview (always visible) ─────────────────────────────────────────
   loadOverviewGantt(id);
 
-  // ── Timer section ───────────────────────────────────────────────────────────
-  loadTimerSection(id);
-
   // ── Manual time entry ────────────────────────────────────────────────────────
   document.getElementById('add-manual-time-btn').addEventListener('click', () =>
     openManualTimeForm(id, () => loadDetail(el, id))
@@ -487,10 +483,12 @@ async function loadDetail(el, id) {
   );
 
   // ── Global handlers ─────────────────────────────────────────────────────────
-  window._advanceStatus = async (orderId, nextStatus) => {
-    await api.put(`/work-orders/${orderId}`, { status: nextStatus });
-    showToast('Status uppdaterad', 'success');
-    loadDetail(el, id);
+  window._setStatus = async (orderId, newStatus) => {
+    try {
+      await api.put(`/work-orders/${orderId}`, { status: newStatus });
+      showToast('Status uppdaterad', 'success');
+      loadDetail(el, id);
+    } catch (err) { showToast(err.message, 'error'); }
   };
   window._editWO = (orderId) => openEditWOForm(orderId, users, () => loadDetail(el, id));
   window._deleteLine = async (lineId) => {
@@ -499,103 +497,17 @@ async function loadDetail(el, id) {
       loadDetail(el, id);
     }
   };
-  window._stopTimer = async (entryId, orderId) => {
-    await api.post(`/time-entries/${entryId}/stop`, {});
-    showToast('Tidmätning stoppad', 'success');
-    loadDetail(el, orderId);
-  };
   window._deleteTE = async (entryId, orderId) => {
     if (await confirmDialog('Ta bort tidpost?')) {
       await api.delete(`/time-entries/${entryId}`);
       loadDetail(el, orderId);
     }
   };
-  window._showInvoice = async (orderId) => {
-    const inv = await api.get(`/work-orders/${orderId}/invoice`);
-    openModal({
-      title: `Fakturaunderlag – ${inv.order_number}`,
-      size: 'modal-lg',
-      body: `
-        <p><strong>Kund:</strong> ${inv.customer?.name || '–'}</p>
-        <p style="margin-top:4px"><strong>Fordon:</strong> ${inv.vehicle ? `${inv.vehicle.license_plate} ${inv.vehicle.make || ''} ${inv.vehicle.model || ''}` : '–'}</p>
-        <p style="margin-top:4px"><strong>Ärende:</strong> ${inv.description}</p>
-        <hr class="divider">
-        <h3 style="margin-bottom:12px">Reservdelar</h3>
-        <table style="width:100%;margin-bottom:16px">
-          <thead><tr><th>Artikel</th><th class="text-right">Antal</th><th class="text-right">À-pris</th><th class="text-right">Totalt</th></tr></thead>
-          <tbody>
-            ${inv.lines.map(l => `<tr><td>${l.description}</td><td class="text-right">${l.quantity} ${l.unit}</td><td class="text-right">${l.unit_price.toLocaleString('sv-SE')} kr</td><td class="text-right">${l.total.toLocaleString('sv-SE', {minimumFractionDigits:2})} kr</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">Inga delar</td></tr>'}
-          </tbody>
-          <tfoot><tr class="total-row"><td colspan="3">Summa delar</td><td class="text-right">${inv.parts_total.toLocaleString('sv-SE', {minimumFractionDigits:2})} kr</td></tr></tfoot>
-        </table>
-        <h3 style="margin-bottom:12px">Arbetstid</h3>
-        <table style="width:100%">
-          <thead><tr><th>Mekaniker</th><th>Typ</th><th class="text-right">Tid</th></tr></thead>
-          <tbody>
-            ${inv.time_entries.map(e => `<tr><td>${e.user}</td><td>${e.type}</td><td class="text-right">${fmtDuration(e.minutes || 0)}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted">Ingen tid</td></tr>'}
-          </tbody>
-          <tfoot><tr class="total-row"><td colspan="2">Total tid</td><td class="text-right">${fmtDuration(inv.labor_minutes)}</td></tr></tfoot>
-        </table>
-      `,
-    });
+  window._downloadInvoice = async (orderId) => {
+    try {
+      await downloadFile(`/work-orders/${orderId}/invoice`, `fakturaunderlag-${wo.order_number}.pdf`);
+    } catch (err) { showToast(err.message, 'error'); }
   };
-}
-
-// ── Timer section ─────────────────────────────────────────────────────────────
-
-async function loadTimerSection(orderId) {
-  let section = document.getElementById('timer-section');
-  if (!section) return;
-  const active = await api.get('/time-entries/active').catch(() => null);
-  section = document.getElementById('timer-section');
-  if (!section) return; // page was navigated away from while this request was in flight
-  if (active && active.work_order_id == orderId) {
-    const start = new Date(active.start_time + 'Z');
-    section.innerHTML = `
-      <div class="timer-card">
-        <div class="timer-label">Aktiv tidmätning</div>
-        <div class="timer-display" id="detail-clock">00:00:00</div>
-        <div style="color:rgba(255,255,255,.6);font-size:13px;margin-top:4px;margin-bottom:16px">Startad ${fmtDate(active.start_time, true)}</div>
-        <button class="btn btn-danger" onclick="window._stopTimer(${active.id}, ${orderId})">Stoppa</button>
-      </div>
-    `;
-    const tick = () => {
-      const e = document.getElementById('detail-clock');
-      if (!e) { clearInterval(iv); return; }
-      const diff = Math.floor((Date.now() - start.getTime()) / 1000);
-      e.textContent = [Math.floor(diff/3600), Math.floor((diff%3600)/60), diff%60].map(n=>String(n).padStart(2,'0')).join(':');
-    };
-    tick();
-    const iv = setInterval(tick, 1000);
-  } else if (!active) {
-    section.innerHTML = `
-      <div class="card">
-        <div class="card-body">
-          <form id="start-timer-inline" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-            <div class="field" style="margin:0;min-width:160px">
-              <label>Typ av arbete</label>
-              <select name="entry_type">
-                <option value="övrigt">Övrigt</option>
-                <option value="felsökning">Felsökning</option>
-                <option value="reparation">Reparation</option>
-                <option value="provkörning">Provkörning</option>
-              </select>
-            </div>
-            <button type="submit" class="btn btn-success" style="margin-bottom:16px">▶ Starta tidmätning</button>
-          </form>
-        </div>
-      </div>
-    `;
-    document.getElementById('start-timer-inline')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const { entry_type } = Object.fromEntries(new FormData(e.target));
-      try {
-        await api.post('/time-entries/start', { work_order_id: orderId, entry_type });
-        showToast('Tidmätning startad', 'success');
-        loadTimerSection(orderId);
-      } catch (err) { showToast(err.message, 'error'); }
-    });
-  }
 }
 
 // ── Time entry row helper ─────────────────────────────────────────────────────
@@ -605,11 +517,10 @@ function timeEntryRow(e, orderId) {
     <td>${e.user?.full_name || '–'}</td>
     <td>${e.entry_type}</td>
     <td>${fmtDate(e.start_time, true)}</td>
-    <td>${e.end_time ? fmtDate(e.end_time, true) : '<span class="badge badge-pagaende">Pågår</span>'}</td>
+    <td>${e.end_time ? fmtDate(e.end_time, true) : '–'}</td>
     <td class="text-right quantity-cell">${e.duration_minutes != null ? fmtDuration(e.duration_minutes) : '–'}</td>
     <td>
-      ${!e.end_time ? `<button class="btn btn-sm btn-danger" onclick="window._stopTimer(${e.id}, ${orderId})">Stopp</button>` : ''}
-      <button class="btn-icon" onclick="window._deleteTE(${e.id}, ${orderId})">
+      <button type="button" class="btn-icon" title="Ta bort" onclick="window._deleteTE(${e.id}, ${orderId})">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
       </button>
     </td>
@@ -867,46 +778,43 @@ async function loadPurchases(orderId, users) {
     return;
   }
 
-  el.innerHTML = `
-    <div class="card">
+  el.innerHTML = purchases.map(p => `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header" style="align-items:flex-start">
+        <div>
+          <span class="card-title">${p.purchase_number || 'Inköp'}</span>
+          ${p.supplier ? `<span class="text-muted" style="margin-left:8px">${p.supplier}</span>` : ''}
+          ${p.description ? `<div class="text-muted" style="font-size:13px;margin-top:2px">${p.description}</div>` : ''}
+          ${p.delivery_week ? `<div class="text-muted" style="font-size:12px;margin-top:2px">Leveransvecka ${p.delivery_week}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select class="purchase-status-sel" data-id="${p.id}" style="font-size:12px;padding:3px 6px;width:auto">
+            ${Object.entries(PURCHASE_STATUS).map(([k,v]) => `<option value="${k}" ${p.status===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+          <button type="button" class="btn-icon" title="Redigera" onclick="window._editPurchase(${orderId}, ${p.id})">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+          </button>
+          <button type="button" class="btn-icon" title="Ta bort" onclick="window._deletePurchase(${orderId}, ${p.id})">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr>
-            <th>Inköpsnr</th><th>Leverantör</th><th>Benämning</th>
-            <th>Art.nr</th><th class="text-right">Antal</th>
-            <th>Lev.vecka</th><th>Status</th><th></th>
-          </tr></thead>
+          <thead><tr><th>Artikel</th><th>Art.nr</th><th class="text-right">Antal</th></tr></thead>
           <tbody>
-            ${purchases.map(p => `
+            ${p.lines.length ? p.lines.map(l => `
               <tr>
-                <td class="font-mono">${p.purchase_number || '–'}</td>
-                <td>${p.supplier || '–'}</td>
-                <td>${p.description || '–'}</td>
-                <td class="font-mono text-muted">${p.article_number || '–'}</td>
-                <td class="text-right">${p.quantity ?? '–'}</td>
-                <td>${p.delivery_week ? 'v.' + p.delivery_week : '–'}</td>
-                <td>
-                  <select class="purchase-status-sel" data-id="${p.id}" style="font-size:12px;padding:3px 6px">
-                    ${Object.entries(PURCHASE_STATUS).map(([k,v]) => `<option value="${k}" ${p.status===k?'selected':''}>${v}</option>`).join('')}
-                  </select>
-                </td>
-                <td>
-                  <div style="display:flex;gap:4px">
-                    <button type="button" class="btn-icon" title="Redigera" onclick="window._editPurchase(${orderId}, ${p.id})">
-                      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-                    </button>
-                    <button type="button" class="btn-icon" title="Ta bort" onclick="window._deletePurchase(${orderId}, ${p.id})">
-                      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-                    </button>
-                  </div>
-                </td>
+                <td>${l.description}</td>
+                <td class="font-mono text-muted">${l.article_number || (l.article?.article_number) || '–'}</td>
+                <td class="text-right">${l.quantity} ${l.unit}</td>
               </tr>
-            `).join('')}
+            `).join('') : '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:14px">Inga artiklar</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
-  `;
+  `).join('');
 
   el.querySelectorAll('.purchase-status-sel').forEach(sel => {
     sel.addEventListener('change', async () => {
@@ -933,6 +841,22 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
   const settings = await api.get('/settings').catch(() => []);
   const mode = (settings.find?.(s => s.key === 'purchase_number_mode') || {}).value || 'auto';
 
+  // Selected article lines, keyed by article id (or a synthetic key for free text)
+  const selected = new Map();
+  let manualCounter = 0;
+  if (purchase) {
+    purchase.lines.forEach(l => {
+      const key = l.article_id ? `a${l.article_id}` : `m${l.id}`;
+      selected.set(key, {
+        article_id: l.article_id || null,
+        description: l.description,
+        article_number: l.article_number || (l.article?.article_number) || null,
+        quantity: parseFloat(l.quantity),
+        unit: l.unit || 'st',
+      });
+    });
+  }
+
   openModal({
     title: purchase ? 'Redigera inköp' : 'Nytt inköp',
     size: 'modal-lg',
@@ -943,19 +867,38 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
         ` : ''}
         <div class="form-row">
           <div class="field"><label>Leverantör</label><input type="text" name="supplier" value="${purchase?.supplier || ''}" placeholder="Leverantörens namn"></div>
-          <div class="field"><label>Artikelnummer</label><input type="text" name="article_number" value="${purchase?.article_number || ''}"></div>
-        </div>
-        <div class="field"><label>Benämning</label><input type="text" name="description" value="${purchase?.description || ''}" placeholder="Vad beställs?"></div>
-        <div class="form-row">
-          <div class="field"><label>Antal</label><input type="number" name="quantity" value="${purchase?.quantity ?? 1}" step="0.01" min="0"></div>
           <div class="field"><label>Leveransvecka</label><input type="number" name="delivery_week" value="${purchase?.delivery_week || ''}" min="1" max="53" placeholder="t.ex. 42"></div>
         </div>
+        <div class="field"><label>Benämning / notering</label><input type="text" name="description" value="${(purchase?.description || '').replace(/"/g,'&quot;')}" placeholder="t.ex. Bromsdelar bak"></div>
         <div class="field">
           <label>Status</label>
           <select name="status">
             ${Object.entries(PURCHASE_STATUS).map(([k,v]) => `<option value="${k}" ${(purchase?.status||'beställd')===k?'selected':''}>${v}</option>`).join('')}
           </select>
         </div>
+
+        <hr class="divider">
+        <div class="field">
+          <label>Sök artikel i lager att lägga till</label>
+          <div class="search-wrap" style="max-width:none">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+            <input type="search" id="pu-article-search" placeholder="Namn, art.nr, plats…">
+          </div>
+          <div id="pu-article-results" class="pl-results"></div>
+          <div style="margin-top:6px">
+            <button type="button" class="btn btn-ghost btn-sm" id="pu-add-free">+ Lägg till fri rad (utan lagerartikel)</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Artiklar på inköpet (<span id="pu-count">${selected.size}</span>)</label>
+          <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+            <table>
+              <thead><tr><th>Benämning</th><th>Art.nr</th><th style="width:90px">Antal</th><th></th></tr></thead>
+              <tbody id="pu-lines-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
           <button type="submit" class="btn btn-primary">${purchase ? 'Spara' : 'Skapa'}</button>
@@ -963,13 +906,94 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
       </form>
     `,
   });
+
+  function renderLines() {
+    const tbody = document.getElementById('pu-lines-tbody');
+    document.getElementById('pu-count').textContent = selected.size;
+    if (!selected.size) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-muted" style="text-align:center;padding:16px">Inga artiklar valda</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = [...selected.entries()].map(([key, l]) => `
+      <tr>
+        <td>${l.article_id ? `<strong>${l.description}</strong>` : `<input type="text" value="${(l.description || '').replace(/"/g,'&quot;')}" data-desc="${key}" placeholder="Benämning" style="width:100%">`}</td>
+        <td class="font-mono text-muted">${l.article_number || '–'}</td>
+        <td><input type="number" min="0.01" step="0.01" value="${l.quantity}" data-qty="${key}" style="width:70px"></td>
+        <td><button type="button" class="btn-icon" data-remove="${key}">✕</button></td>
+      </tr>
+    `).join('');
+    tbody.querySelectorAll('[data-qty]').forEach(inp => {
+      inp.addEventListener('input', () => { selected.get(inp.dataset.qty).quantity = parseFloat(inp.value) || 1; });
+    });
+    tbody.querySelectorAll('[data-desc]').forEach(inp => {
+      inp.addEventListener('input', () => { selected.get(inp.dataset.desc).description = inp.value; });
+    });
+    tbody.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.addEventListener('click', () => { selected.delete(btn.dataset.remove); renderLines(); });
+    });
+  }
+  renderLines();
+
+  document.getElementById('pu-add-free').addEventListener('click', () => {
+    const key = `m-new${++manualCounter}`;
+    selected.set(key, { article_id: null, description: '', article_number: null, quantity: 1, unit: 'st' });
+    renderLines();
+  });
+
+  const searchInput = document.getElementById('pu-article-search');
+  const resultsBox = document.getElementById('pu-article-results');
+  let searchTimer;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { resultsBox.innerHTML = ''; resultsBox.classList.remove('open'); return; }
+    searchTimer = setTimeout(async () => {
+      const matches = await api.get(`/articles?q=${encodeURIComponent(q)}&limit=25`);
+      resultsBox.classList.add('open');
+      resultsBox.innerHTML = matches.length
+        ? matches.map(a => `
+            <div class="pl-result-row" data-id="${a.id}">
+              <strong>${a.name}</strong>
+              <span class="text-muted">${a.article_number || ''} ${a.location ? '· ' + a.location : ''} ${a.supplier ? '· ' + a.supplier : ''}</span>
+            </div>
+          `).join('')
+        : `<div class="pl-result-row text-muted">Inga träffar</div>`;
+      resultsBox.querySelectorAll('[data-id]').forEach(row => {
+        row.addEventListener('click', () => {
+          const a = matches.find(x => x.id === parseInt(row.dataset.id));
+          const key = `a${a.id}`;
+          const cur = selected.get(key);
+          if (cur) cur.quantity += 1;
+          else selected.set(key, { article_id: a.id, description: a.name, article_number: a.article_number || null, quantity: 1, unit: a.unit || 'st' });
+          renderLines();
+          searchInput.value = '';
+          resultsBox.innerHTML = '';
+          resultsBox.classList.remove('open');
+        });
+      });
+    }, 250);
+  });
+
   document.getElementById('purchase-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = Object.fromEntries(new FormData(e.target));
-    if (body.quantity) body.quantity = parseFloat(body.quantity);
-    if (body.delivery_week) body.delivery_week = parseInt(body.delivery_week);
-    else delete body.delivery_week;
-    if (!body.purchase_number) delete body.purchase_number;
+    const fd = Object.fromEntries(new FormData(e.target));
+    const lines = [...selected.values()]
+      .filter(l => (l.description || '').trim())
+      .map(l => ({
+        article_id: l.article_id || null,
+        description: l.description.trim(),
+        article_number: l.article_number || null,
+        quantity: l.quantity || 1,
+        unit: l.unit || 'st',
+      }));
+    const body = {
+      supplier: fd.supplier || null,
+      description: fd.description || null,
+      status: fd.status,
+      delivery_week: fd.delivery_week ? parseInt(fd.delivery_week) : null,
+      lines,
+    };
+    if (fd.purchase_number) body.purchase_number = fd.purchase_number;
     try {
       if (purchase) await api.put(`/work-orders/${orderId}/purchases/${purchase.id}`, body);
       else await api.post(`/work-orders/${orderId}/purchases`, body);
@@ -1191,7 +1215,10 @@ async function loadActivities(orderId) {
                 <strong>${ACTIVITY_TYPES[a.activity_type] || a.activity_type}</strong>
                 <span class="text-muted" style="font-size:12px">${fmtDate(a.created_at, true)}</span>
                 ${a.creator ? `<span class="text-muted" style="font-size:12px">• ${a.creator.full_name}</span>` : ''}
-                <button type="button" class="btn-icon" title="Ta bort" style="margin-left:auto" onclick="window._deleteActivity(${orderId}, ${a.id})">
+                <button type="button" class="btn-icon" title="Redigera" style="margin-left:auto" onclick="window._editActivity(${orderId}, ${a.id})">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+                </button>
+                <button type="button" class="btn-icon" title="Ta bort" onclick="window._deleteActivity(${orderId}, ${a.id})">
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
                 </button>
               </div>
@@ -1212,6 +1239,40 @@ async function loadActivities(orderId) {
       loadActivities(orderId);
     } catch (err) { showToast(err.message, 'error'); }
   });
+
+  window._editActivity = async (oid, aid) => {
+    const list = await api.get(`/work-orders/${oid}/activities`).catch(() => []);
+    const activity = list.find(a => a.id === aid);
+    if (!activity) return;
+    openModal({
+      title: 'Redigera aktivitet',
+      body: `
+        <form id="edit-activity-form">
+          <div class="field">
+            <label>Typ</label>
+            <select name="activity_type">
+              ${Object.entries(ACTIVITY_TYPES).map(([k,v]) => `<option value="${k}" ${activity.activity_type===k?'selected':''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Beskrivning *</label><input type="text" name="description" value="${(activity.description || '').replace(/"/g, '&quot;')}" required></div>
+          <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+            <button type="submit" class="btn btn-primary">Spara</button>
+          </div>
+        </form>
+      `,
+    });
+    document.getElementById('edit-activity-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target));
+      try {
+        await api.put(`/work-orders/${oid}/activities/${aid}`, body);
+        showToast('Aktivitet uppdaterad', 'success');
+        closeModal();
+        loadActivities(oid);
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  };
 
   window._deleteActivity = async (oid, aid) => {
     if (await confirmDialog('Ta bort aktivitet?')) {
@@ -1250,6 +1311,9 @@ async function loadTasks(orderId, users) {
                 ${t.completed && t.completed_at ? `<span>Klar ${fmtDate(t.completed_at, true)}</span>` : ''}
               </div>
             </div>
+            <button type="button" class="btn-icon" title="Redigera" onclick="window._editTask(${orderId}, ${t.id})">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+            </button>
             <button type="button" class="btn-icon" title="Ta bort" onclick="window._deleteTask(${orderId}, ${t.id})">
               <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
             </button>
@@ -1262,6 +1326,10 @@ async function loadTasks(orderId, users) {
   window._toggleTask = async (oid, tid, completed) => {
     await api.put(`/work-orders/${oid}/tasks/${tid}`, { completed });
     loadTasks(oid, users);
+  };
+  window._editTask = (oid, tid) => {
+    const task = tasks.find(t => t.id === tid);
+    if (task) openTaskForm(oid, task, users, () => loadTasks(oid, users));
   };
   window._deleteTask = async (oid, tid) => {
     if (await confirmDialog('Ta bort uppgift?')) {
@@ -1315,14 +1383,11 @@ function openTaskForm(orderId, task, users, onSaved) {
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 function lineRow(l) {
-  const total = parseFloat(l.quantity) * parseFloat(l.unit_price);
   return `<tr>
     <td>${l.description}</td>
     <td class="font-mono text-muted">${l.article?.article_number || '–'}</td>
     <td class="text-right quantity-cell">${l.quantity}</td>
     <td>${l.unit}</td>
-    <td class="text-right">${fmtPrice(l.unit_price)}</td>
-    <td class="text-right">${fmtPrice(total)}</td>
     <td>
       <button class="btn-icon" onclick="window._deleteLine(${l.id})">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
@@ -1351,7 +1416,6 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
           <div class="field"><label>Antal</label><input type="number" name="quantity" value="1" step="0.01" min="0.01" required></div>
           <div class="field"><label>Enhet</label><input type="text" name="unit" value="st"></div>
         </div>
-        <div class="field"><label>À-pris (kr)</label><input type="number" name="unit_price" value="0" step="0.01" min="0" id="line-price"></div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
           <button type="submit" class="btn btn-primary">Lägg till</button>
@@ -1383,7 +1447,6 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
           const a = matches.find(x => x.id === parseInt(row.dataset.id));
           selectedArticle = a;
           document.getElementById('line-desc').value = a.name;
-          document.getElementById('line-price').value = a.price || 0;
           document.querySelector('[name="unit"]').value = a.unit || 'st';
           document.getElementById('line-article-selected').textContent = `Vald: ${a.name} (${a.article_number || '–'})`;
           searchInput.value = '';
@@ -1399,7 +1462,6 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
     const body = Object.fromEntries(new FormData(e.target));
     body.article_id = selectedArticle ? selectedArticle.id : null;
     body.quantity = parseFloat(body.quantity);
-    body.unit_price = parseFloat(body.unit_price);
     try {
       await api.post(`/work-orders/${orderId}/lines`, body);
       showToast('Rad tillagd', 'success');
@@ -1410,7 +1472,8 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
 }
 
 function openEditWOForm(orderId, users, onSaved) {
-  api.get(`/work-orders/${orderId}`).then(wo => {
+  api.get(`/work-orders/${orderId}`).then(async wo => {
+    const contacts = await api.get(`/customers/${wo.customer_id}/contacts`).catch(() => []);
     openModal({
       title: 'Redigera arbetsorder',
       size: 'modal-lg',
@@ -1426,9 +1489,16 @@ function openEditWOForm(orderId, users, onSaved) {
               </select>
             </div>
             <div class="field">
-              <label>Schemalagd</label>
-              <input type="datetime-local" name="scheduled_date" value="${wo.scheduled_date ? wo.scheduled_date.slice(0,16) : ''}">
+              <label>Kontaktperson</label>
+              <select name="contact_person_id">
+                <option value="">Ingen kontakt</option>
+                ${contacts.map(ct => `<option value="${ct.id}" ${wo.contact_person_id == ct.id ? 'selected' : ''}>${ct.name}${ct.title ? ' – ' + ct.title : ''}</option>`).join('')}
+              </select>
             </div>
+          </div>
+          <div class="field">
+            <label>Schemalagd</label>
+            <input type="datetime-local" name="scheduled_date" value="${wo.scheduled_date ? wo.scheduled_date.slice(0,16) : ''}">
           </div>
           <div class="field"><label>Interna anteckningar</label><textarea name="internal_notes">${wo.internal_notes || ''}</textarea></div>
           <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
@@ -1444,6 +1514,7 @@ function openEditWOForm(orderId, users, onSaved) {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(e.target));
       body.assigned_to = body.assigned_to ? Number(body.assigned_to) : null;
+      body.contact_person_id = body.contact_person_id ? Number(body.contact_person_id) : null;
       if (!body.scheduled_date) body.scheduled_date = null;
       if (!body.internal_notes) body.internal_notes = null;
       try {
@@ -1464,6 +1535,3 @@ function openEditWOForm(orderId, users, onSaved) {
   });
 }
 
-function fmtPrice(p) {
-  return parseFloat(p).toLocaleString('sv-SE', { minimumFractionDigits: 2 }) + ' kr';
-}

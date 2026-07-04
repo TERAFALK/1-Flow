@@ -209,7 +209,7 @@ export async function renderScanner(el) {
     }
     linesBody.innerHTML = `
       <table style="width:100%">
-        <thead><tr><th>Artikel</th><th class="text-right">Antal</th><th class="text-right">Pris</th></tr></thead>
+        <thead><tr><th>Artikel</th><th class="text-right">Antal</th></tr></thead>
         <tbody>
           ${lines.map(l => `
             <tr>
@@ -217,16 +217,9 @@ export async function renderScanner(el) {
                 ${l.article?.article_number ? `<br><small class="font-mono text-muted">${l.article.article_number}</small>` : ''}
               </td>
               <td class="text-right">${l.quantity} ${l.unit}</td>
-              <td class="text-right">${parseFloat(l.unit_price).toLocaleString('sv-SE')} kr</td>
             </tr>
           `).join('')}
         </tbody>
-        <tfoot>
-          <tr class="total-row">
-            <td colspan="2">Summa delar</td>
-            <td class="text-right">${lines.reduce((s, l) => s + parseFloat(l.quantity) * parseFloat(l.unit_price), 0).toLocaleString('sv-SE', { minimumFractionDigits: 2 })} kr</td>
-          </tr>
-        </tfoot>
       </table>
     `;
   }

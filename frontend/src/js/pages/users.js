@@ -21,7 +21,7 @@ export async function renderUsers(el) {
 
   document.getElementById('new-user-btn').addEventListener('click', () => openUserForm(null, loadList));
 
-  const roleLabels = { admin: 'Administratör', chef: 'Verkstadschef', mekaniker: 'Mekaniker', lager: 'Lager/Inköp' };
+  const roleLabels = { admin: 'Administratör', tekniker: 'Tekniker' };
   let allRows = [];
 
   async function loadList() {
@@ -87,9 +87,7 @@ function openUserForm(user, onSaved) {
         <div class="field">
           <label>Roll</label>
           <select name="role">
-            <option value="mekaniker" ${user?.role === 'mekaniker' ? 'selected' : ''}>Mekaniker</option>
-            <option value="lager" ${user?.role === 'lager' ? 'selected' : ''}>Lager/Inköp</option>
-            <option value="chef" ${user?.role === 'chef' ? 'selected' : ''}>Verkstadschef</option>
+            <option value="tekniker" ${user?.role !== 'admin' ? 'selected' : ''}>Tekniker</option>
             <option value="admin" ${user?.role === 'admin' ? 'selected' : ''}>Administratör</option>
           </select>
         </div>

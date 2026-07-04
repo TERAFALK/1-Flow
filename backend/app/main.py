@@ -21,6 +21,18 @@ def _run_migrations():
     stmts = [
         # work_orders – new columns
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS body_text TEXT",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS contact_person_id INTEGER REFERENCES contact_persons(id) ON DELETE SET NULL",
+        # purchases – header description is now optional (lines carry the articles)
+        "ALTER TABLE purchases ALTER COLUMN description DROP NOT NULL",
+        """CREATE TABLE IF NOT EXISTS purchase_lines (
+            id SERIAL PRIMARY KEY,
+            purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+            article_id INTEGER REFERENCES articles(id) ON DELETE SET NULL,
+            description VARCHAR NOT NULL,
+            article_number VARCHAR,
+            quantity NUMERIC DEFAULT 1,
+            unit VARCHAR DEFAULT 'st'
+        )""",
         # articles – new columns
         "ALTER TABLE articles ADD COLUMN IF NOT EXISTS supplier VARCHAR",
         # contact_persons
@@ -129,6 +141,27 @@ def _run_migrations():
         conn.commit()
 
 _run_migrations()
+
+
+def _migrate_roles():
+    """Collapse legacy roles (chef/mekaniker/lager) to 'tekniker'."""
+    from sqlalchemy import text
+    # A newly added enum value must be committed before it can be used, so run
+    # the ADD VALUE in its own autocommit connection.
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'tekniker'"))
+    except Exception as e:
+        print(f"Role migration warning (add value): {e}")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("UPDATE users SET role = 'tekniker' WHERE role <> 'admin'"))
+            conn.commit()
+    except Exception as e:
+        print(f"Role migration warning (update): {e}")
+
+
+_migrate_roles()
 
 app = FastAPI(title="Flow - Verkstadsystem", version="1.0.0")
 

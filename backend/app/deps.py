@@ -31,6 +31,6 @@ def require_admin(current_user: models.User = Depends(get_current_user)) -> mode
 
 
 def require_chef_or_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
-    if current_user.role not in (models.UserRole.admin, models.UserRole.chef):
+    if current_user.role != models.UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Otillräckliga rättigheter")
     return current_user

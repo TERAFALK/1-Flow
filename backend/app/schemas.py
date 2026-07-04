@@ -27,7 +27,7 @@ class UserCreate(BaseModel):
     email: str
     password: str
     full_name: str
-    role: UserRole = UserRole.mekaniker
+    role: UserRole = UserRole.tekniker
 
 
 class UserUpdate(BaseModel):
@@ -307,24 +307,40 @@ class WorkOrderPhaseOut(BaseModel):
 
 # ── Purchases ─────────────────────────────────────────────────────────────────
 
+class PurchaseLineCreate(BaseModel):
+    article_id: Optional[int] = None
+    description: str
+    article_number: Optional[str] = None
+    quantity: Decimal = Decimal("1")
+    unit: str = "st"
+
+
+class PurchaseLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    article_id: Optional[int]
+    description: str
+    article_number: Optional[str]
+    quantity: Decimal
+    unit: str
+
+
 class PurchaseCreate(BaseModel):
     purchase_number: Optional[str] = None
     supplier: Optional[str] = None
     description: Optional[str] = None
-    article_number: Optional[str] = None
-    quantity: Optional[Decimal] = Decimal("1")
     delivery_week: Optional[int] = None
     status: PurchaseStatus = PurchaseStatus.beställd
+    lines: List[PurchaseLineCreate] = []
 
 
 class PurchaseUpdate(BaseModel):
     purchase_number: Optional[str] = None
     supplier: Optional[str] = None
     description: Optional[str] = None
-    article_number: Optional[str] = None
-    quantity: Optional[Decimal] = None
     delivery_week: Optional[int] = None
     status: Optional[PurchaseStatus] = None
+    lines: Optional[List[PurchaseLineCreate]] = None
 
 
 class PurchaseOut(BaseModel):
@@ -333,12 +349,11 @@ class PurchaseOut(BaseModel):
     work_order_id: int
     purchase_number: Optional[str]
     supplier: Optional[str]
-    description: str
-    article_number: Optional[str]
-    quantity: Decimal
+    description: Optional[str]
     delivery_week: Optional[str]
     status: PurchaseStatus
     created_at: datetime
+    lines: List[PurchaseLineOut] = []
 
 
 # ── Files ─────────────────────────────────────────────────────────────────────
@@ -362,6 +377,11 @@ class WorkOrderFileOut(BaseModel):
 class ActivityCreate(BaseModel):
     activity_type: ActivityType = ActivityType.anteckning
     description: str
+
+
+class ActivityUpdate(BaseModel):
+    activity_type: Optional[ActivityType] = None
+    description: Optional[str] = None
 
 
 class ActivityOut(BaseModel):
@@ -415,6 +435,7 @@ class WorkOrderCreate(BaseModel):
     description: str
     order_number: Optional[str] = None
     assigned_to: Optional[int] = None
+    contact_person_id: Optional[int] = None
     scheduled_date: Optional[datetime] = None
     internal_notes: Optional[str] = None
 
@@ -426,6 +447,7 @@ class WorkOrderUpdate(BaseModel):
     body_text: Optional[str] = None
     status: Optional[WorkOrderStatus] = None
     assigned_to: Optional[int] = None
+    contact_person_id: Optional[int] = None
     scheduled_date: Optional[datetime] = None
     internal_notes: Optional[str] = None
 
@@ -440,6 +462,7 @@ class WorkOrderOut(BaseModel):
     body_text: Optional[str]
     status: WorkOrderStatus
     assigned_to: Optional[int]
+    contact_person_id: Optional[int]
     scheduled_date: Optional[datetime]
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -448,6 +471,7 @@ class WorkOrderOut(BaseModel):
     customer: Optional[CustomerOut] = None
     vehicle: Optional[VehicleOut] = None
     assigned_to_user: Optional[UserOut] = None
+    contact_person: Optional[ContactPersonOut] = None
     lines: List[WorkOrderLineOut] = []
     time_entries: List[TimeEntryOut] = []
 

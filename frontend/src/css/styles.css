@@ -436,9 +436,7 @@ tbody tr.clickable { cursor: pointer; }
 .badge-fakturerad{ background: var(--border);        color: var(--text-2); }
 
 .badge-admin     { background: var(--accent-light);  color: var(--accent); }
-.badge-chef      { background: var(--info-light);    color: var(--info); }
-.badge-mekaniker { background: var(--success-light); color: var(--success); }
-.badge-lager     { background: var(--warning-light); color: var(--warning); }
+.badge-tekniker  { background: var(--success-light); color: var(--success); }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────────── */
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }

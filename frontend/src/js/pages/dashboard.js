@@ -43,7 +43,7 @@ export async function renderDashboard(el) {
       <div class="stat-card">
         <div class="stat-label">Aktiva tidmätningar</div>
         <div class="stat-value">${timers}</div>
-        <div class="stat-sub">Mekaniker i arbete</div>
+        <div class="stat-sub">Tekniker i arbete</div>
       </div>
     </div>
 

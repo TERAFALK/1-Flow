@@ -10,9 +10,7 @@ from .database import Base
 
 class UserRole(str, PyEnum):
     admin = "admin"
-    chef = "chef"
-    mekaniker = "mekaniker"
-    lager = "lager"
+    tekniker = "tekniker"
 
 
 class WorkOrderStatus(str, PyEnum):
@@ -64,7 +62,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=False)
-    role = Column(Enum(UserRole), default=UserRole.mekaniker, nullable=False)
+    role = Column(Enum(UserRole), default=UserRole.tekniker, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -141,6 +139,7 @@ class WorkOrder(Base):
     body_text = Column(Text)
     status = Column(Enum(WorkOrderStatus), default=WorkOrderStatus.ny, nullable=False)
     assigned_to = Column(Integer, ForeignKey("users.id"))
+    contact_person_id = Column(Integer, ForeignKey("contact_persons.id", ondelete="SET NULL"))
     scheduled_date = Column(DateTime)
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
@@ -150,6 +149,7 @@ class WorkOrder(Base):
 
     customer = relationship("Customer", back_populates="work_orders")
     vehicle = relationship("Vehicle", back_populates="work_orders")
+    contact_person = relationship("ContactPerson", foreign_keys=[contact_person_id])
     assigned_to_user = relationship(
         "User", back_populates="assigned_orders",
         foreign_keys=[assigned_to]
@@ -207,7 +207,7 @@ class Purchase(Base):
     work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
     purchase_number = Column(String)
     supplier = Column(String)
-    description = Column(String, nullable=False)
+    description = Column(String)
     article_number = Column(String)
     quantity = Column(Numeric(10, 2), default=1)
     delivery_week = Column(String)
@@ -215,6 +215,25 @@ class Purchase(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     work_order = relationship("WorkOrder", back_populates="purchases")
+    lines = relationship(
+        "PurchaseLine", back_populates="purchase",
+        cascade="all, delete-orphan", order_by="PurchaseLine.id"
+    )
+
+
+class PurchaseLine(Base):
+    __tablename__ = "purchase_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=False)
+    article_id = Column(Integer, ForeignKey("articles.id"))
+    description = Column(String, nullable=False)
+    article_number = Column(String)
+    quantity = Column(Numeric(10, 2), default=1, nullable=False)
+    unit = Column(String, default="st")
+
+    purchase = relationship("Purchase", back_populates="lines")
+    article = relationship("Article")
 
 
 class WorkOrderFile(Base):

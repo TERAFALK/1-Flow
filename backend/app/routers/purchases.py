@@ -1,7 +1,7 @@
 import io
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -10,11 +10,25 @@ from reportlab.pdfgen import canvas
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Purchase, WorkOrder, Settings, User
+from ..models import Purchase, PurchaseLine, WorkOrder, Settings, User
 from ..schemas import PurchaseCreate, PurchaseUpdate, PurchaseOut
 from ..pdf_utils import draw_header
 
 router = APIRouter(prefix="/api/work-orders", tags=["purchases"])
+
+_LOAD = [joinedload(Purchase.lines).joinedload(PurchaseLine.article)]
+
+
+def _get(db: Session, order_id: int, purchase_id: int) -> Purchase:
+    purchase = (
+        db.query(Purchase)
+        .options(*_LOAD)
+        .filter(Purchase.id == purchase_id, Purchase.work_order_id == order_id)
+        .first()
+    )
+    if not purchase:
+        raise HTTPException(404, "Inköp ej hittat")
+    return purchase
 
 
 def _next_purchase_number(db: Session) -> str:
@@ -36,7 +50,12 @@ def _next_purchase_number(db: Session) -> str:
 def list_purchases(order_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     if not db.get(WorkOrder, order_id):
         raise HTTPException(404, "Arbetsorder ej hittad")
-    return db.query(Purchase).filter(Purchase.work_order_id == order_id).order_by(Purchase.id).all()
+    return (
+        db.query(Purchase).options(*_LOAD)
+        .filter(Purchase.work_order_id == order_id)
+        .order_by(Purchase.id)
+        .all()
+    )
 
 
 @router.post("/{order_id}/purchases", response_model=PurchaseOut, status_code=201)
@@ -49,7 +68,7 @@ def create_purchase(
     if not db.get(WorkOrder, order_id):
         raise HTTPException(404, "Arbetsorder ej hittad")
 
-    data = body.model_dump()
+    data = body.model_dump(exclude={"lines"})
     if not data.get("purchase_number"):
         mode = db.get(Settings, "purchase_number_mode")
         if not mode or mode.value == "auto":
@@ -59,9 +78,11 @@ def create_purchase(
 
     purchase = Purchase(work_order_id=order_id, **data)
     db.add(purchase)
+    db.flush()
+    for line in body.lines:
+        db.add(PurchaseLine(purchase_id=purchase.id, **line.model_dump()))
     db.commit()
-    db.refresh(purchase)
-    return purchase
+    return _get(db, order_id, purchase.id)
 
 
 @router.put("/{order_id}/purchases/{purchase_id}", response_model=PurchaseOut)
@@ -72,16 +93,19 @@ def update_purchase(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    purchase = db.query(Purchase).filter(
-        Purchase.id == purchase_id, Purchase.work_order_id == order_id
-    ).first()
-    if not purchase:
-        raise HTTPException(404, "Inköp ej hittat")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    purchase = _get(db, order_id, purchase_id)
+    data = body.model_dump(exclude_unset=True)
+    lines = data.pop("lines", None)
+    for k, v in data.items():
         setattr(purchase, k, v)
+    if lines is not None:
+        # Replace the whole set of lines with the provided selection
+        purchase.lines.clear()
+        db.flush()
+        for line in lines:
+            db.add(PurchaseLine(purchase_id=purchase.id, **line))
     db.commit()
-    db.refresh(purchase)
-    return purchase
+    return _get(db, order_id, purchase_id)
 
 
 @router.get("/{order_id}/purchases/pdf")
@@ -93,7 +117,12 @@ def purchases_pdf(
     wo = db.get(WorkOrder, order_id)
     if not wo:
         raise HTTPException(404, "Arbetsorder ej hittad")
-    purchases = db.query(Purchase).filter(Purchase.work_order_id == order_id).order_by(Purchase.id).all()
+    purchases = (
+        db.query(Purchase).options(*_LOAD)
+        .filter(Purchase.work_order_id == order_id)
+        .order_by(Purchase.id)
+        .all()
+    )
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
@@ -102,62 +131,72 @@ def purchases_pdf(
 
     subtitle = wo.order_number + (f" – {wo.customer.name}" if wo.customer else "")
     y = draw_header(c, page_w, "Inköp", subtitle)
-    c.setFont("Helvetica", 9)
-    c.setFillColor(colors.HexColor("#666666"))
-    c.drawString(margin, y, f"Ärende: {(wo.description or '')[:90]}")
-    c.setFillColor(colors.black)
-    y -= 20
+    y -= 6
 
-    col_x = {
-        "nr": margin,
-        "desc": margin + 27 * mm,
-        "art": margin + 76 * mm,
-        "sup": margin + 100 * mm,
-        "qty": margin + 128 * mm,   # högerjusteras mot +138
-        "week": margin + 141 * mm,
-        "status": margin + 153 * mm,
+    def new_page_if_needed(yy, needed=40):
+        if yy < (25 + needed) * mm:
+            c.showPage()
+            return draw_header(c, page_w, "Inköp", subtitle) - 6
+        return yy
+
+    if not purchases:
+        c.setFont("Helvetica", 10)
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawString(margin, y - 12, "Inga inköp registrerade")
+        c.setFillColor(colors.black)
+
+    status_labels = {
+        "ej_beställd": "Ej beställd", "beställd": "Beställd",
+        "inlevererad": "Inlevererad", "avbeställd": "Avbeställd",
     }
 
-    def header_row(yy):
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillColor(colors.HexColor("#1a1a1a"))
-        c.rect(margin, yy - 14, page_w - 2 * margin, 16, fill=1, stroke=0)
-        c.setFillColor(colors.white)
-        c.drawString(col_x["nr"], yy - 10, "Inköpsnr")
-        c.drawString(col_x["desc"], yy - 10, "Benämning")
-        c.drawString(col_x["art"], yy - 10, "Art.nr")
-        c.drawString(col_x["sup"], yy - 10, "Leverantör")
-        c.drawString(col_x["qty"], yy - 10, "Antal")
-        c.drawString(col_x["week"], yy - 10, "Vecka")
-        c.drawString(col_x["status"], yy - 10, "Status")
-        c.setFillColor(colors.black)
-        return yy - 18
-
-    y = header_row(y)
-    c.setFont("Helvetica", 8.5)
-    row_h = 16
-    if not purchases:
-        c.setFillColor(colors.HexColor("#666666"))
-        c.drawString(margin, y - 8, "Inga inköp registrerade")
-        c.setFillColor(colors.black)
     for p in purchases:
-        if y < 25 * mm:
-            c.showPage()
-            y = draw_header(c, page_w, "Inköp", subtitle)
-            y -= 10
-            y = header_row(y)
-            c.setFont("Helvetica", 8.5)
-        c.drawString(col_x["nr"], y - 8, (p.purchase_number or "")[:14])
-        c.drawString(col_x["desc"], y - 8, (p.description or "")[:28])
-        c.drawString(col_x["art"], y - 8, (p.article_number or "")[:13])
-        c.drawString(col_x["sup"], y - 8, (p.supplier or "")[:16])
-        c.drawRightString(col_x["qty"] + 10 * mm, y - 8, f"{float(p.quantity or 0):g}")
-        c.drawString(col_x["week"], y - 8, f"v.{p.delivery_week}" if p.delivery_week else "")
-        c.drawString(col_x["status"], y - 8, (p.status.value if p.status else "").capitalize())
-        c.setStrokeColor(colors.HexColor("#dddddd"))
-        c.line(margin, y - row_h + 2, page_w - margin, y - row_h + 2)
-        c.setStrokeColor(colors.black)
-        y -= row_h
+        y = new_page_if_needed(y, needed=30)
+        # Purchase header
+        c.setFont("Helvetica-Bold", 10.5)
+        header = p.purchase_number or "Inköp"
+        if p.supplier:
+            header += f" · {p.supplier}"
+        c.drawString(margin, y - 12, header)
+        c.setFont("Helvetica", 9)
+        c.setFillColor(colors.HexColor("#666666"))
+        meta = status_labels.get(p.status.value if p.status else "", "")
+        if p.delivery_week:
+            meta += f" · Leveransvecka {p.delivery_week}"
+        c.drawRightString(page_w - margin, y - 12, meta)
+        c.setFillColor(colors.black)
+        y -= 20
+        if p.description:
+            c.setFont("Helvetica-Oblique", 9)
+            c.drawString(margin, y - 8, (p.description or "")[:100])
+            y -= 14
+
+        # Lines table
+        c.setFont("Helvetica-Bold", 8.5)
+        c.setFillColor(colors.HexColor("#333333"))
+        c.rect(margin, y - 13, page_w - 2 * margin, 15, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.drawString(margin + 2, y - 9, "Benämning")
+        c.drawString(margin + 95 * mm, y - 9, "Art.nr")
+        c.drawRightString(page_w - margin - 4, y - 9, "Antal")
+        c.setFillColor(colors.black)
+        y -= 17
+        c.setFont("Helvetica", 8.5)
+        if not p.lines:
+            c.setFillColor(colors.HexColor("#888888"))
+            c.drawString(margin + 2, y - 8, "Inga artiklar")
+            c.setFillColor(colors.black)
+            y -= 15
+        for l in p.lines:
+            y = new_page_if_needed(y, needed=8)
+            c.drawString(margin + 2, y - 8, (l.description or "")[:58])
+            c.drawString(margin + 95 * mm, y - 8, (l.article_number or (l.article.article_number if l.article else "")) or "–")
+            c.drawRightString(page_w - margin - 4, y - 8, f"{float(l.quantity):g} {l.unit}")
+            c.setStrokeColor(colors.HexColor("#e5e5e5"))
+            c.line(margin, y - 12, page_w - margin, y - 12)
+            c.setStrokeColor(colors.black)
+            y -= 16
+        y -= 14
 
     c.save()
     buf.seek(0)

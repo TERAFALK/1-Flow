@@ -5,7 +5,7 @@ from typing import List
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import Activity, WorkOrder, User
-from ..schemas import ActivityCreate, ActivityOut
+from ..schemas import ActivityCreate, ActivityUpdate, ActivityOut
 
 router = APIRouter(prefix="/api/work-orders", tags=["activities"])
 
@@ -34,6 +34,26 @@ def create_activity(
         raise HTTPException(404, "Arbetsorder ej hittad")
     activity = Activity(work_order_id=order_id, created_by=current_user.id, **body.model_dump())
     db.add(activity)
+    db.commit()
+    db.refresh(activity)
+    return db.query(Activity).options(joinedload(Activity.creator)).get(activity.id)
+
+
+@router.put("/{order_id}/activities/{activity_id}", response_model=ActivityOut)
+def update_activity(
+    order_id: int,
+    activity_id: int,
+    body: ActivityUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    activity = db.query(Activity).filter(
+        Activity.id == activity_id, Activity.work_order_id == order_id
+    ).first()
+    if not activity:
+        raise HTTPException(404, "Aktivitet ej hittad")
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(activity, k, v)
     db.commit()
     db.refresh(activity)
     return db.query(Activity).options(joinedload(Activity.creator)).get(activity.id)

@@ -11,11 +11,11 @@ export async function renderArticles(el) {
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">Lager & Artiklar</div>
+        <div class="page-title">Artiklar</div>
         <div class="page-subtitle">Artikelregister</div>
       </div>
       <div class="flex gap-2">
-        <button class="btn btn-ghost btn-danger" id="clear-stock-btn">Rensa lager</button>
+        <button class="btn btn-ghost btn-danger" id="clear-stock-btn">Rensa artiklar</button>
         <button class="btn btn-secondary" id="import-excel-btn">Importera Excel</button>
         <input type="file" id="import-excel-input" accept=".xlsx,.xls" class="hidden">
         <button class="btn btn-primary" id="new-article-btn">
@@ -99,7 +99,7 @@ export async function renderArticles(el) {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Artikel</th><th>Art.nr</th><th>Företag</th><th>Streckkod</th>
+            <th>Artikel</th><th>Art.nr</th><th>Företag</th>
             <th>Plats</th><th></th>
           </tr></thead>
           <tbody>
@@ -108,7 +108,6 @@ export async function renderArticles(el) {
                 <td><strong>${a.name}</strong>${a.description ? `<br><small class="text-muted">${a.description}</small>` : ''}</td>
                 <td class="font-mono">${a.article_number || '–'}</td>
                 <td>${a.supplier || '–'}</td>
-                <td class="font-mono">${a.barcode || '–'}</td>
                 <td>${a.location || '–'}</td>
                 <td>
                   <div class="flex gap-2">

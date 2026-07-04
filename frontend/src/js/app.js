@@ -66,7 +66,7 @@ const PAGE_TITLES = {
   '/customers':    'Kunder',
   '/vehicles':     'Fordon',
   '/scanner':      'Scanner',
-  '/articles':     'Lager',
+  '/articles':     'Artiklar',
   '/pick-lists':   'Plocklistor',
   '/time-entries': 'Tidrapportering',
   '/calendar':     'Kalender',
@@ -74,8 +74,25 @@ const PAGE_TITLES = {
   '/settings':     'Inställningar',
 };
 
+// Pages a non-admin (tekniker) is allowed to open. Everything else redirects here.
+const TEKNIKER_ALLOWED = ['/scanner'];
+
+function currentRole() {
+  try { return JSON.parse(localStorage.getItem('flow_user') || '{}').role; }
+  catch { return null; }
+}
+
 async function route() {
   const { path, params } = parseHash();
+
+  // Role gate: technicians only get the scanner
+  if (currentRole() && currentRole() !== 'admin') {
+    const base = '/' + path.split('/')[1];
+    if (!TEKNIKER_ALLOWED.includes(base)) {
+      if (location.hash !== '#/scanner') { location.hash = '#/scanner'; return; }
+    }
+  }
+
   const content = document.getElementById('page-content');
   content.innerHTML = '<div class="loading">Laddar…</div>';
 
@@ -143,11 +160,21 @@ function showApp(user) {
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('user-name').textContent = user.full_name;
   document.getElementById('user-avatar').textContent = user.full_name.charAt(0).toUpperCase();
-  const roleLabels = { admin: 'Administratör', chef: 'Verkstadschef', mekaniker: 'Mekaniker', lager: 'Lager/Inköp' };
+  const roleLabels = { admin: 'Administratör', tekniker: 'Tekniker' };
   document.getElementById('user-role').textContent = roleLabels[user.role] || user.role;
   if (user.role === 'admin') {
     document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('hidden'));
+  } else {
+    // Tekniker: show only the scanner in the sidebar
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.classList.toggle('hidden', el.dataset.page !== 'scanner');
+    });
   }
+}
+
+function landingRoute(user) {
+  return user.role === 'admin' ? '#/dashboard' : '#/scanner';
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
@@ -168,7 +195,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       localStorage.setItem('flow_token', result.access_token);
       localStorage.setItem('flow_user', JSON.stringify(result.user));
       showApp(result.user);
-      window.location.hash = '#/dashboard';
+      window.location.hash = landingRoute(result.user);
       route();
     } catch (err) {
       errEl.textContent = err.message;
@@ -184,7 +211,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     localStorage.removeItem('flow_token');
     localStorage.removeItem('flow_user');
     showLogin();
-    if (window._timerInterval) clearInterval(window._timerInterval);
   });
 
   // Token expired / unauthorized

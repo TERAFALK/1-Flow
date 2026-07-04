@@ -94,7 +94,7 @@ def stop_timer(
     entry = db.get(TimeEntry, entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Tidpost ej hittad")
-    if entry.user_id != current_user.id and current_user.role not in ("admin", "chef"):
+    if entry.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Kan bara stoppa egna tidmätningar")
     if entry.end_time:
         raise HTTPException(status_code=400, detail="Tidmätningen är redan stoppad")
@@ -132,7 +132,7 @@ def delete_time_entry(
     entry = db.get(TimeEntry, entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Tidpost ej hittad")
-    if entry.user_id != current_user.id and current_user.role not in ("admin", "chef"):
+    if entry.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Otillräckliga rättigheter")
     db.delete(entry)
     db.commit()

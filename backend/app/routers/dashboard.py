@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..database import get_db
 from ..deps import get_current_user
 from ..schemas import DashboardStats, WorkOrderListItem
-from ..models import WorkOrder, WorkOrderStatus, TimeEntry, User, Vehicle
+from ..models import WorkOrder, WorkOrderStatus, User, Vehicle
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -29,7 +29,7 @@ def dashboard(
         WorkOrder.scheduled_date <= today_end,
     ).count()
 
-    active_timers = db.query(TimeEntry).filter(TimeEntry.end_time.is_(None)).count()
+    ready_to_invoice = by_status[WorkOrderStatus.klar.value]
 
     recent = (
         db.query(WorkOrder)
@@ -47,6 +47,6 @@ def dashboard(
         total_open=total_open,
         by_status=by_status,
         scheduled_today=scheduled_today,
-        active_timers=active_timers,
+        ready_to_invoice=ready_to_invoice,
         recent_orders=[WorkOrderListItem.model_validate(o) for o in recent],
     )

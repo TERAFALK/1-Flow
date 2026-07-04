@@ -18,7 +18,7 @@ export async function renderDashboard(el) {
   const openOrders = data.total_open;
   const ongoing   = data.by_status.pagaende || 0;
   const today     = data.scheduled_today;
-  const timers    = data.active_timers;
+  const readyToInvoice = data.ready_to_invoice;
 
   el.innerHTML = `
     <div class="page-title" style="margin-bottom:4px">Översikt</div>
@@ -41,9 +41,9 @@ export async function renderDashboard(el) {
         <div class="stat-sub">Planerade för idag</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Aktiva tidmätningar</div>
-        <div class="stat-value">${timers}</div>
-        <div class="stat-sub">Tekniker i arbete</div>
+        <div class="stat-label">Klara att fakturera</div>
+        <div class="stat-value">${readyToInvoice}</div>
+        <div class="stat-sub">Väntar på fakturering</div>
       </div>
     </div>
 

@@ -534,7 +534,7 @@ class DashboardStats(BaseModel):
     total_open: int
     by_status: dict
     scheduled_today: int
-    active_timers: int
+    ready_to_invoice: int
     recent_orders: List[WorkOrderListItem]
 
 

@@ -482,3 +482,63 @@ def invoice_pdf(
         buf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Parts (reservdelar) PDF ───────────────────────────────────────────────────
+
+@router.get("/{order_id}/parts/pdf")
+def parts_pdf(
+    order_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    wo = _get_wo(db, order_id)
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    page_w, page_h = A4
+    margin = 18 * mm
+
+    subtitle = wo.order_number + (f" – {wo.customer.name}" if wo.customer else "")
+    y = draw_header(c, page_w, "Reservdelar", subtitle)
+    y -= 6
+
+    def new_page_if_needed(yy, needed=40):
+        if yy < (25 + needed) * mm:
+            c.showPage()
+            return draw_header(c, page_w, "Reservdelar", subtitle) - 6
+        return yy
+
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColor(colors.HexColor("#1a1a1a"))
+    c.rect(margin, y - 14, page_w - 2 * margin, 16, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.drawString(margin + 2, y - 10, "Artikel")
+    c.drawString(margin + 95 * mm, y - 10, "Art.nr")
+    c.drawRightString(page_w - margin - 4, y - 10, "Antal")
+    c.setFillColor(colors.black)
+    y -= 18
+
+    c.setFont("Helvetica", 8.5)
+    if not wo.lines:
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawString(margin + 2, y - 8, "Inga reservdelar")
+        c.setFillColor(colors.black)
+        y -= 16
+    for l in wo.lines:
+        y = new_page_if_needed(y, needed=8)
+        c.drawString(margin + 2, y - 8, (l.description or "")[:60])
+        c.drawString(margin + 95 * mm, y - 8, (l.article.article_number if l.article else "") or "–")
+        c.drawRightString(page_w - margin - 4, y - 8, f"{float(l.quantity):g} {l.unit}")
+        c.setStrokeColor(colors.HexColor("#dddddd"))
+        c.line(margin, y - 12, page_w - margin, y - 12)
+        c.setStrokeColor(colors.black)
+        y -= 16
+
+    c.save()
+    buf.seek(0)
+    filename = f"reservdelar-{wo.order_number}.pdf"
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

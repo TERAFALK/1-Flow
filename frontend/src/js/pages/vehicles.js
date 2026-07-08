@@ -141,6 +141,10 @@ export async function renderVehicleDetail(el, id) {
             ${metaRow('Motor', v.engine)}
             ${metaRow('Växellåda', v.gearbox)}
             ${metaRow('Mätarst.', v.odometer ? v.odometer.toLocaleString('sv-SE') + ' km' : null)}
+            ${metaRow('Kraftuttag', v.kraftuttag)}
+            ${metaRow('Utväxling', v.utvaxling)}
+            ${metaRow('Rotation', v.rotation)}
+            ${metaRow('Medbringare', v.medbringare)}
             ${v.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2)">${v.notes}</p>` : ''}
           </div>
         </div>
@@ -227,6 +231,14 @@ async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
           <div class="field"><label>Växellåda</label><input type="text" name="gearbox" value="${vehicle?.gearbox || ''}"></div>
         </div>
         <div class="field"><label>Mätarställning (km)</label><input type="number" name="odometer" value="${vehicle?.odometer || ''}"></div>
+        <div class="form-row">
+          <div class="field"><label>Kraftuttag</label><input type="text" name="kraftuttag" value="${vehicle?.kraftuttag || ''}"></div>
+          <div class="field"><label>Utväxling</label><input type="text" name="utvaxling" value="${vehicle?.utvaxling || ''}"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Rotation</label><input type="text" name="rotation" value="${vehicle?.rotation || ''}"></div>
+          <div class="field"><label>Medbringare</label><input type="text" name="medbringare" value="${vehicle?.medbringare || ''}"></div>
+        </div>
         <div class="field"><label>Anteckningar</label><textarea name="notes">${vehicle?.notes || ''}</textarea></div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>

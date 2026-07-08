@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { api, downloadFile } from '../api.js';
 import { showToast } from '../components/toast.js';
 
 export async function renderScanner(el) {
@@ -18,6 +18,16 @@ export async function renderScanner(el) {
       <!-- Left: order selector + scanned lines -->
       <div>
         <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><span class="card-title">Läge</span></div>
+          <div class="card-body">
+            <div class="field">
+              <label><input type="radio" name="scan-mode" id="mode-order" value="order" checked> Arbetsorder</label><br>
+              <label><input type="radio" name="scan-mode" id="mode-temp" value="temp"> Tillfällig lista (utan order)</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px" id="order-select-card">
           <div class="card-header"><span class="card-title">Välj arbetsorder</span></div>
           <div class="card-body">
             <div class="field">
@@ -31,8 +41,19 @@ export async function renderScanner(el) {
           </div>
         </div>
 
+        <div class="card" style="margin-bottom:16px;display:none" id="temp-list-card">
+          <div class="card-header"><span class="card-title">Tillfällig lista</span></div>
+          <div class="card-body">
+            <button class="btn btn-secondary" id="new-temp-list-btn" style="width:100%">+ Ny tillfällig lista</button>
+            <div id="temp-list-info"></div>
+          </div>
+        </div>
+
         <div class="card" id="scan-lines-card" style="display:none">
-          <div class="card-header"><span class="card-title">Skannade artiklar</span></div>
+          <div class="card-header">
+            <span class="card-title">Skannade artiklar</span>
+            <button class="btn btn-ghost" id="print-scan-list-btn" style="display:none">Ladda ner PDF</button>
+          </div>
           <div id="scan-lines-body" class="card-body" style="padding:0">
             <div class="empty-state" style="padding:24px"><p>Inga artiklar ännu</p></div>
           </div>
@@ -79,17 +100,83 @@ export async function renderScanner(el) {
     </div>
   `;
 
-  const orderSel    = document.getElementById('scanner-order');
-  const startBtn    = document.getElementById('start-scan-btn');
-  const input       = document.getElementById('scanner-input');
-  const feedback    = document.getElementById('scan-feedback');
-  const indicator   = document.getElementById('scanner-indicator');
-  const linesCard   = document.getElementById('scan-lines-card');
-  const linesBody   = document.getElementById('scan-lines-body');
-  const warningBox  = document.getElementById('stock-warning-box');
-  const orderInfo   = document.getElementById('selected-order-info');
+  const orderSel      = document.getElementById('scanner-order');
+  const startBtn      = document.getElementById('start-scan-btn');
+  const input         = document.getElementById('scanner-input');
+  const feedback      = document.getElementById('scan-feedback');
+  const indicator     = document.getElementById('scanner-indicator');
+  const linesCard     = document.getElementById('scan-lines-card');
+  const linesBody     = document.getElementById('scan-lines-body');
+  const warningBox    = document.getElementById('stock-warning-box');
+  const orderInfo     = document.getElementById('selected-order-info');
+  const orderCard     = document.getElementById('order-select-card');
+  const tempCard      = document.getElementById('temp-list-card');
+  const tempInfo      = document.getElementById('temp-list-info');
+  const newTempBtn    = document.getElementById('new-temp-list-btn');
+  const printListBtn  = document.getElementById('print-scan-list-btn');
+  const modeOrderRadio = document.getElementById('mode-order');
+  const modeTempRadio  = document.getElementById('mode-temp');
 
   let scanning = false;
+  let mode = 'order'; // 'order' | 'temp'
+  let tempListId = null;
+
+  function currentTargetId() {
+    return mode === 'order' ? orderSel.value : tempListId;
+  }
+
+  document.querySelectorAll('input[name="scan-mode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      mode = r.value;
+      stopScanning();
+      warningBox.classList.add('hidden');
+      if (mode === 'order') {
+        orderCard.style.display = '';
+        tempCard.style.display = 'none';
+        printListBtn.style.display = 'none';
+        if (orderSel.value) {
+          startBtn.disabled = false;
+          linesCard.style.display = '';
+          refreshLines(orderSel.value);
+        } else {
+          startBtn.disabled = true;
+          linesCard.style.display = 'none';
+        }
+      } else {
+        orderCard.style.display = 'none';
+        tempCard.style.display = '';
+        startBtn.disabled = !tempListId;
+        linesCard.style.display = tempListId ? '' : 'none';
+        printListBtn.style.display = tempListId ? '' : 'none';
+        if (tempListId) refreshLines(tempListId);
+      }
+    });
+  });
+
+  newTempBtn.addEventListener('click', async () => {
+    try {
+      const title = `Tillfällig skanning ${new Date().toLocaleString('sv-SE')}`;
+      const pl = await api.post('/pick-lists', { title, lines: [] });
+      tempListId = pl.id;
+      tempInfo.innerHTML = `
+        <div class="alert alert-info" style="margin-top:12px;margin-bottom:0">
+          <strong>${pl.title}</strong>
+        </div>
+      `;
+      startBtn.disabled = false;
+      linesCard.style.display = '';
+      printListBtn.style.display = '';
+      await refreshLines(tempListId);
+      showToast('Tillfällig lista skapad', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  printListBtn.addEventListener('click', async () => {
+    if (!tempListId) return;
+    try {
+      await downloadFile(`/pick-lists/${tempListId}/pdf`, `skanning-${tempListId}.pdf`);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
 
   orderSel.addEventListener('change', () => {
     const id = orderSel.value;
@@ -170,11 +257,14 @@ export async function renderScanner(el) {
   async function submitScan() {
     const barcode = input.value.trim();
     if (!barcode || !scanning) return;
-    const orderId = orderSel.value;
+    const targetId = currentTargetId();
     input.value = '';
+    if (!targetId) return;
 
     try {
-      const result = await api.post(`/work-orders/${orderId}/scan`, { barcode });
+      const result = mode === 'order'
+        ? await api.post(`/work-orders/${targetId}/scan`, { barcode })
+        : await api.post(`/pick-lists/${targetId}/scan`, { barcode });
       const name = result.article_name;
       showFeedback(`${name} — ${result.line.quantity} ${result.line.unit}`, result.unknown ? 'warning' : 'success');
       if (result.stock_warning) {
@@ -184,7 +274,7 @@ export async function renderScanner(el) {
         warningBox.classList.add('hidden');
       }
       showToast(`${name} tillagd`, result.unknown ? 'warning' : 'success', 2000);
-      await refreshLines(orderId);
+      await refreshLines(targetId);
     } catch (err) {
       showFeedback(err.message, 'error');
       showToast(err.message, 'error', 3000);
@@ -201,8 +291,10 @@ export async function renderScanner(el) {
     feedback._timer = setTimeout(() => { feedback.style.display = 'none'; }, 4000);
   }
 
-  async function refreshLines(orderId) {
-    const lines = await api.get(`/work-orders/${orderId}/lines`).catch(() => []);
+  async function refreshLines(targetId) {
+    const lines = mode === 'order'
+      ? await api.get(`/work-orders/${targetId}/lines`).catch(() => [])
+      : await api.get(`/pick-lists/${targetId}`).then(pl => pl.lines).catch(() => []);
     if (!lines.length) {
       linesBody.innerHTML = '<div class="empty-state" style="padding:24px"><p>Inga artiklar ännu</p></div>';
       return;
@@ -214,7 +306,7 @@ export async function renderScanner(el) {
           ${lines.map(l => `
             <tr>
               <td><strong>${l.description}</strong>
-                ${l.article?.article_number ? `<br><small class="font-mono text-muted">${l.article.article_number}</small>` : ''}
+                ${(l.article?.article_number || l.article_number) ? `<br><small class="font-mono text-muted">${l.article?.article_number || l.article_number}</small>` : ''}
               </td>
               <td class="text-right">${l.quantity} ${l.unit}</td>
             </tr>

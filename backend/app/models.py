@@ -121,6 +121,10 @@ class Vehicle(Base):
     engine = Column(String)
     gearbox = Column(String)
     odometer = Column(Integer)
+    kraftuttag = Column(String)
+    utvaxling = Column(String)
+    rotation = Column(String)
+    medbringare = Column(String)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 

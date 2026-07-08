@@ -108,6 +108,62 @@ def update_purchase(
     return _get(db, order_id, purchase_id)
 
 
+_STATUS_LABELS = {
+    "ej_beställd": "Ej beställd", "beställd": "Beställd",
+    "inlevererad": "Inlevererad", "avbeställd": "Avbeställd",
+}
+
+
+def _draw_purchase(c, page_w, margin, y, p, new_page_if_needed):
+    y = new_page_if_needed(y, needed=30)
+    # Purchase header
+    c.setFont("Helvetica-Bold", 10.5)
+    header = p.purchase_number or "Inköp"
+    if p.supplier:
+        header += f" · {p.supplier}"
+    c.drawString(margin, y - 12, header)
+    c.setFont("Helvetica", 9)
+    c.setFillColor(colors.HexColor("#666666"))
+    meta = _STATUS_LABELS.get(p.status.value if p.status else "", "")
+    if p.delivery_week:
+        meta += f" · Leveransvecka {p.delivery_week}"
+    c.drawRightString(page_w - margin, y - 12, meta)
+    c.setFillColor(colors.black)
+    y -= 20
+    if p.description:
+        c.setFont("Helvetica-Oblique", 9)
+        c.drawString(margin, y - 8, (p.description or "")[:100])
+        y -= 14
+
+    # Lines table
+    c.setFont("Helvetica-Bold", 8.5)
+    c.setFillColor(colors.HexColor("#333333"))
+    c.rect(margin, y - 13, page_w - 2 * margin, 15, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.drawString(margin + 2, y - 9, "Benämning")
+    c.drawString(margin + 95 * mm, y - 9, "Art.nr")
+    c.drawRightString(page_w - margin - 4, y - 9, "Antal")
+    c.setFillColor(colors.black)
+    y -= 17
+    c.setFont("Helvetica", 8.5)
+    if not p.lines:
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawString(margin + 2, y - 8, "Inga artiklar")
+        c.setFillColor(colors.black)
+        y -= 15
+    for l in p.lines:
+        y = new_page_if_needed(y, needed=8)
+        c.drawString(margin + 2, y - 8, (l.description or "")[:58])
+        c.drawString(margin + 95 * mm, y - 8, (l.article_number or (l.article.article_number if l.article else "")) or "–")
+        c.drawRightString(page_w - margin - 4, y - 8, f"{float(l.quantity):g} {l.unit}")
+        c.setStrokeColor(colors.HexColor("#e5e5e5"))
+        c.line(margin, y - 12, page_w - margin, y - 12)
+        c.setStrokeColor(colors.black)
+        y -= 16
+    y -= 14
+    return y
+
+
 @router.get("/{order_id}/purchases/pdf")
 def purchases_pdf(
     order_id: int,
@@ -145,62 +201,50 @@ def purchases_pdf(
         c.drawString(margin, y - 12, "Inga inköp registrerade")
         c.setFillColor(colors.black)
 
-    status_labels = {
-        "ej_beställd": "Ej beställd", "beställd": "Beställd",
-        "inlevererad": "Inlevererad", "avbeställd": "Avbeställd",
-    }
-
     for p in purchases:
-        y = new_page_if_needed(y, needed=30)
-        # Purchase header
-        c.setFont("Helvetica-Bold", 10.5)
-        header = p.purchase_number or "Inköp"
-        if p.supplier:
-            header += f" · {p.supplier}"
-        c.drawString(margin, y - 12, header)
-        c.setFont("Helvetica", 9)
-        c.setFillColor(colors.HexColor("#666666"))
-        meta = status_labels.get(p.status.value if p.status else "", "")
-        if p.delivery_week:
-            meta += f" · Leveransvecka {p.delivery_week}"
-        c.drawRightString(page_w - margin, y - 12, meta)
-        c.setFillColor(colors.black)
-        y -= 20
-        if p.description:
-            c.setFont("Helvetica-Oblique", 9)
-            c.drawString(margin, y - 8, (p.description or "")[:100])
-            y -= 14
-
-        # Lines table
-        c.setFont("Helvetica-Bold", 8.5)
-        c.setFillColor(colors.HexColor("#333333"))
-        c.rect(margin, y - 13, page_w - 2 * margin, 15, fill=1, stroke=0)
-        c.setFillColor(colors.white)
-        c.drawString(margin + 2, y - 9, "Benämning")
-        c.drawString(margin + 95 * mm, y - 9, "Art.nr")
-        c.drawRightString(page_w - margin - 4, y - 9, "Antal")
-        c.setFillColor(colors.black)
-        y -= 17
-        c.setFont("Helvetica", 8.5)
-        if not p.lines:
-            c.setFillColor(colors.HexColor("#888888"))
-            c.drawString(margin + 2, y - 8, "Inga artiklar")
-            c.setFillColor(colors.black)
-            y -= 15
-        for l in p.lines:
-            y = new_page_if_needed(y, needed=8)
-            c.drawString(margin + 2, y - 8, (l.description or "")[:58])
-            c.drawString(margin + 95 * mm, y - 8, (l.article_number or (l.article.article_number if l.article else "")) or "–")
-            c.drawRightString(page_w - margin - 4, y - 8, f"{float(l.quantity):g} {l.unit}")
-            c.setStrokeColor(colors.HexColor("#e5e5e5"))
-            c.line(margin, y - 12, page_w - margin, y - 12)
-            c.setStrokeColor(colors.black)
-            y -= 16
-        y -= 14
+        y = _draw_purchase(c, page_w, margin, y, p, new_page_if_needed)
 
     c.save()
     buf.seek(0)
     filename = f"inkop-{wo.order_number}.pdf"
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{order_id}/purchases/{purchase_id}/pdf")
+def purchase_pdf(
+    order_id: int,
+    purchase_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    wo = db.get(WorkOrder, order_id)
+    if not wo:
+        raise HTTPException(404, "Arbetsorder ej hittad")
+    p = _get(db, order_id, purchase_id)
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    page_w, page_h = A4
+    margin = 18 * mm
+
+    subtitle = wo.order_number + (f" – {wo.customer.name}" if wo.customer else "")
+    y = draw_header(c, page_w, "Inköp", subtitle)
+    y -= 6
+
+    def new_page_if_needed(yy, needed=40):
+        if yy < (25 + needed) * mm:
+            c.showPage()
+            return draw_header(c, page_w, "Inköp", subtitle) - 6
+        return yy
+
+    _draw_purchase(c, page_w, margin, y, p, new_page_if_needed)
+
+    c.save()
+    buf.seek(0)
+    filename = f"inkop-{p.purchase_number or p.id}.pdf"
     return StreamingResponse(
         buf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},

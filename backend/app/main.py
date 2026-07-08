@@ -35,6 +35,11 @@ def _run_migrations():
         )""",
         # articles – new columns
         "ALTER TABLE articles ADD COLUMN IF NOT EXISTS supplier VARCHAR",
+        # vehicles – new columns
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS kraftuttag VARCHAR",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS utvaxling VARCHAR",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS rotation VARCHAR",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS medbringare VARCHAR",
         # contact_persons
         """CREATE TABLE IF NOT EXISTS contact_persons (
             id SERIAL PRIMARY KEY,

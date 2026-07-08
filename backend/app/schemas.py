@@ -121,6 +121,10 @@ class VehicleCreate(BaseModel):
     engine: Optional[str] = None
     gearbox: Optional[str] = None
     odometer: Optional[int] = None
+    kraftuttag: Optional[str] = None
+    utvaxling: Optional[str] = None
+    rotation: Optional[str] = None
+    medbringare: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -134,6 +138,10 @@ class VehicleUpdate(BaseModel):
     engine: Optional[str] = None
     gearbox: Optional[str] = None
     odometer: Optional[int] = None
+    kraftuttag: Optional[str] = None
+    utvaxling: Optional[str] = None
+    rotation: Optional[str] = None
+    medbringare: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -149,6 +157,10 @@ class VehicleOut(BaseModel):
     engine: Optional[str]
     gearbox: Optional[str]
     odometer: Optional[int]
+    kraftuttag: Optional[str] = None
+    utvaxling: Optional[str] = None
+    rotation: Optional[str] = None
+    medbringare: Optional[str] = None
     notes: Optional[str]
     created_at: datetime
     customer: Optional[CustomerOut] = None
@@ -605,6 +617,12 @@ class PickListOut(BaseModel):
     notes: Optional[str]
     created_at: datetime
     lines: List[PickListLineOut]
+
+
+class PickListScanResult(BaseModel):
+    article_name: str
+    line: PickListLineOut
+    unknown: bool = False
 
 
 Token.model_rebuild()

@@ -310,6 +310,10 @@ async function loadDetail(el, id) {
           Lägg till artikel
         </button>
         <a href="#/scanner?order=${wo.id}" class="btn btn-ghost">Öppna scanner</a>
+        <button class="btn btn-ghost" id="print-parts-btn">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
+          Ladda ner PDF
+        </button>
       </div>
       <div class="card">
         <div class="table-wrap">
@@ -474,6 +478,11 @@ async function loadDetail(el, id) {
   document.getElementById('print-purchases-btn').addEventListener('click', async () => {
     try {
       await downloadFile(`/work-orders/${id}/purchases/pdf`, `inkop-order-${id}.pdf`);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+  document.getElementById('print-parts-btn').addEventListener('click', async () => {
+    try {
+      await downloadFile(`/work-orders/${id}/parts/pdf`, `reservdelar-order-${id}.pdf`);
     } catch (err) { showToast(err.message, 'error'); }
   });
 
@@ -791,6 +800,9 @@ async function loadPurchases(orderId, users) {
           <select class="purchase-status-sel" data-id="${p.id}" style="font-size:12px;padding:3px 6px;width:auto">
             ${Object.entries(PURCHASE_STATUS).map(([k,v]) => `<option value="${k}" ${p.status===k?'selected':''}>${v}</option>`).join('')}
           </select>
+          <button type="button" class="btn-icon" title="Skriv ut PDF" onclick="window._printPurchase(${orderId}, ${p.id})">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
+          </button>
           <button type="button" class="btn-icon" title="Redigera" onclick="window._editPurchase(${orderId}, ${p.id})">
             <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
           </button>
@@ -828,6 +840,11 @@ async function loadPurchases(orderId, users) {
   window._editPurchase = async (oid, pid) => {
     const purchase = await api.get(`/work-orders/${oid}/purchases`).then(list => list.find(p => p.id === pid));
     openPurchaseForm(oid, purchase, users, () => loadPurchases(oid, users));
+  };
+  window._printPurchase = async (oid, pid) => {
+    try {
+      await downloadFile(`/work-orders/${oid}/purchases/${pid}/pdf`, `inkop-${pid}.pdf`);
+    } catch (err) { showToast(err.message, 'error'); }
   };
   window._deletePurchase = async (oid, pid) => {
     if (await confirmDialog('Ta bort inköp?')) {

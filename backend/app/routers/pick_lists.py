@@ -1,6 +1,7 @@
 import io
+from decimal import Decimal
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from reportlab.lib.pagesizes import A4
@@ -12,7 +13,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..schemas import (
     PickListCreate, PickListUpdate, PickListOut, PickListListItem,
-    PickListLineCreate, PickListLineUpdate, PickListLineOut,
+    PickListLineCreate, PickListLineUpdate, PickListLineOut, PickListScanResult,
 )
 from ..models import PickList, PickListLine, Article, User
 from ..pdf_utils import draw_header
@@ -113,6 +114,64 @@ def delete_line(pick_list_id: int, line_id: int, db: Session = Depends(get_db), 
         raise HTTPException(status_code=404, detail="Rad ej hittad")
     db.delete(line)
     db.commit()
+
+
+@router.post("/{pick_list_id}/scan", response_model=PickListScanResult)
+def scan_into_pick_list(
+    pick_list_id: int,
+    barcode: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    if not db.get(PickList, pick_list_id):
+        raise HTTPException(status_code=404, detail="Plocklista ej hittad")
+
+    article = db.query(Article).filter(
+        (Article.barcode == barcode) | (Article.article_number == barcode)
+    ).first()
+
+    if article:
+        line = db.query(PickListLine).filter(
+            PickListLine.pick_list_id == pick_list_id,
+            PickListLine.article_id == article.id,
+        ).first()
+        if line:
+            line.quantity = line.quantity + Decimal("1")
+        else:
+            line = PickListLine(
+                pick_list_id=pick_list_id,
+                article_id=article.id,
+                description=article.name,
+                quantity=Decimal("1"),
+                unit=article.unit,
+                location=article.location,
+            )
+            db.add(line)
+        db.commit()
+        db.refresh(line)
+        line = db.query(PickListLine).options(joinedload(PickListLine.article)).get(line.id)
+        return PickListScanResult(article_name=article.name, line=PickListLineOut.from_line(line), unknown=False)
+    else:
+        desc = f"Okänd ({barcode})"
+        line = db.query(PickListLine).filter(
+            PickListLine.pick_list_id == pick_list_id,
+            PickListLine.article_id.is_(None),
+            PickListLine.description == desc,
+        ).first()
+        if line:
+            line.quantity = line.quantity + Decimal("1")
+        else:
+            line = PickListLine(
+                pick_list_id=pick_list_id,
+                article_id=None,
+                description=desc,
+                quantity=Decimal("1"),
+                unit="st",
+            )
+            db.add(line)
+        db.commit()
+        db.refresh(line)
+        return PickListScanResult(article_name=desc, line=PickListLineOut.from_line(line), unknown=True)
 
 
 @router.get("/{pick_list_id}/pdf")

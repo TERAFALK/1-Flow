@@ -23,10 +23,14 @@ def _get_logo():
     return _logo_drawing
 
 
-def draw_header(c: canvas.Canvas, page_width, title: str, subtitle: str = ""):
-    """Draws the Flow logo top-left and a title, returns the y-position to continue below."""
+def draw_header(c: canvas.Canvas, page_width, title: str, subtitle: str = "", top_y=None):
+    """Draws the Flow logo top-left and a title, returns the y-position to continue below.
+
+    ``top_y`` defaults to the top of an A4 *portrait* page. Pass an explicit value
+    (t.ex. ``page_height - 10*mm``) för liggande/andra sidstorlekar."""
     margin = 18 * mm
-    top_y = 287 * mm
+    if top_y is None:
+        top_y = 287 * mm
     drawing = _get_logo()
     if drawing:
         target_w = 45 * mm

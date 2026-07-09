@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { api, downloadFile } from '../api.js';
 import { fmtDate, statusBadge } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
@@ -124,6 +124,7 @@ export async function renderVehicleDetail(el, id) {
 
     <div class="tabs" id="vehicle-tabs">
       <div class="tab active" data-tab="info">Info</div>
+      <div class="tab" data-tab="turning">Svängradie</div>
       <div class="tab" data-tab="history">Historik <span style="font-size:11px;opacity:.6">(${orders.length})</span></div>
     </div>
 
@@ -145,6 +146,8 @@ export async function renderVehicleDetail(el, id) {
             ${metaRow('Utväxling', v.utvaxling)}
             ${metaRow('Rotation', v.rotation)}
             ${metaRow('Medbringare', v.medbringare)}
+            ${metaRow('Hjulbas', v.wheelbase_mm ? v.wheelbase_mm + ' mm' : null)}
+            ${metaRow('Bredd', v.width_mm ? v.width_mm + ' mm' : null)}
             ${v.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2)">${v.notes}</p>` : ''}
           </div>
         </div>
@@ -152,6 +155,24 @@ export async function renderVehicleDetail(el, id) {
           <div class="card-header"><span class="card-title">Senaste arbetsorder</span></div>
           ${renderOrderTable(orders.slice(0, 5))}
         </div>
+      </div>
+    </div>
+
+    <div id="tab-turning" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Svängradie</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label style="font-size:12px;color:var(--text-3)">Styrvinkel</label>
+            <input type="number" id="turn-angle" value="${v.max_steering_angle || 20}" step="0.5" min="1" max="89" style="width:70px">
+            <span style="font-size:12px;color:var(--text-3)">°</span>
+            <button class="btn btn-ghost btn-sm" id="turn-pdf-btn">
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
+              Ladda ner PDF (liggande)
+            </button>
+          </div>
+        </div>
+        <div class="card-body" id="turn-body"><div class="loading">Laddar…</div></div>
       </div>
     </div>
 
@@ -166,15 +187,95 @@ export async function renderVehicleDetail(el, id) {
     </div>
   `;
 
+  let turningLoaded = false;
   document.getElementById('vehicle-tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('.tab');
     if (!tab) return;
     document.querySelectorAll('#vehicle-tabs .tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    ['info', 'history'].forEach(name => {
+    ['info', 'turning', 'history'].forEach(name => {
       document.getElementById(`tab-${name}`).classList.toggle('hidden', name !== tab.dataset.tab);
     });
+    if (tab.dataset.tab === 'turning' && !turningLoaded) {
+      turningLoaded = true;
+      loadTurning(v);
+    }
   });
+}
+
+function loadTurning(v) {
+  const body = document.getElementById('turn-body');
+  const angleInput = document.getElementById('turn-angle');
+
+  async function render() {
+    const angle = parseFloat(angleInput.value) || 20;
+    body.innerHTML = '<div class="loading">Beräknar…</div>';
+    let res;
+    try {
+      res = await api.get(`/vehicles/${v.id}/turning?angle=${angle}`);
+    } catch (err) {
+      body.innerHTML = `<div class="alert alert-warning" style="margin:0">${err.message}</div>
+        <div class="text-muted" style="font-size:12px;margin-top:8px">Fyll i hjulbas och bredd under Redigera för att beräkna svängradie.</div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:200px 1fr;gap:20px;align-items:start">
+        <div>
+          ${turnStat('Ytterradie R ut', res.r_out, 'var(--accent)')}
+          ${turnStat('Innerradie R in', res.r_in, '#12a150')}
+          ${turnStat('Framaxel R fram', res.r_front)}
+          ${turnStat('Svepbredd', res.swept_width)}
+          ${turnStat('Styrvinkel', res.steering_angle, null, '°', 1)}
+        </div>
+        <div style="min-width:0;overflow-x:auto">${turningSvg(res)}</div>
+      </div>`;
+  }
+
+  angleInput.addEventListener('change', render);
+  document.getElementById('turn-pdf-btn').addEventListener('click', async () => {
+    const angle = parseFloat(angleInput.value) || 20;
+    try {
+      await downloadFile(`/vehicles/${v.id}/turning/pdf?angle=${angle}`, `svangradie-${v.license_plate}.pdf`);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+  render();
+}
+
+function turnStat(label, value, color, unit = 'mm', dec = 0) {
+  const num = unit === 'mm'
+    ? Math.round(value).toLocaleString('sv-SE') + ' mm'
+    : (dec ? Number(value).toFixed(0) : value) + unit;
+  return `<div style="margin-bottom:12px">
+    <div style="font-size:12px;color:var(--text-3)">${label}</div>
+    <div style="font-size:18px;font-weight:700${color ? `;color:${color}` : ''}">${num}</div>
+  </div>`;
+}
+
+function turningSvg(res) {
+  // Passa in alla punkter (mm, y uppåt) i en fast viewBox och flippa y.
+  const W = 640, H = 380, pad = 12;
+  const all = [...res.arc_in, ...res.arc_out, ...res.body, ...res.ghost, res.center];
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const s = Math.min((W - 2 * pad) / (maxX - minX || 1), (H - 2 * pad) / (maxY - minY || 1));
+  const ox = (W - (maxX - minX) * s) / 2, oy = (H - (maxY - minY) * s) / 2;
+  const T = p => [ox + (p[0] - minX) * s, H - (oy + (p[1] - minY) * s)];
+  const pts = arr => arr.map(p => T(p).map(n => n.toFixed(1)).join(',')).join(' ');
+  const band = [...res.arc_out, ...res.arc_in.slice().reverse()];
+  const cen = T(res.center);
+  return `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" font-family="inherit">
+      <polygon points="${pts(band)}" fill="var(--accent)" opacity="0.10"/>
+      <polyline points="${pts(res.arc_out)}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      <polyline points="${pts(res.arc_in)}" fill="none" stroke="#12a150" stroke-width="2"/>
+      <polygon points="${pts(res.ghost)}" fill="none" stroke="#9aa6b2" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.8"/>
+      <polygon points="${pts(res.body)}" fill="var(--accent)" fill-opacity="0.08" stroke="var(--accent)" stroke-width="2"/>
+      <polygon points="${pts(res.cab)}" fill="var(--accent)" opacity="0.2"/>
+      <line x1="${T(res.axle_front[0])[0]}" y1="${T(res.axle_front[0])[1]}" x2="${T(res.axle_front[1])[0]}" y2="${T(res.axle_front[1])[1]}" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+      <line x1="${T(res.axle_rear[0])[0]}" y1="${T(res.axle_rear[0])[1]}" x2="${T(res.axle_rear[1])[0]}" y2="${T(res.axle_rear[1])[1]}" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="${cen[0]}" cy="${cen[1]}" r="4" fill="#e5484d"/>
+    </svg>`;
 }
 
 function renderOrderTable(orders) {
@@ -239,6 +340,19 @@ async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
           <div class="field"><label>Rotation</label><input type="text" name="rotation" value="${vehicle?.rotation || ''}"></div>
           <div class="field"><label>Medbringare</label><input type="text" name="medbringare" value="${vehicle?.medbringare || ''}"></div>
         </div>
+
+        <hr class="divider">
+        <div class="text-muted" style="font-size:12px;margin-bottom:8px">Svängradiemått (för beräkning)</div>
+        <div class="form-row">
+          <div class="field"><label>Hjulbas (mm)</label><input type="number" name="wheelbase_mm" value="${vehicle?.wheelbase_mm || ''}" placeholder="t.ex. 5300"></div>
+          <div class="field"><label>Bredd (mm)</label><input type="number" name="width_mm" value="${vehicle?.width_mm || ''}" placeholder="t.ex. 2550"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Framskjut (mm)</label><input type="number" name="front_overhang_mm" value="${vehicle?.front_overhang_mm || ''}" placeholder="framaxel → front"></div>
+          <div class="field"><label>Bakskjut (mm)</label><input type="number" name="rear_overhang_mm" value="${vehicle?.rear_overhang_mm || ''}" placeholder="bakaxel → bak"></div>
+        </div>
+        <div class="field"><label>Max styrvinkel (°)</label><input type="number" name="max_steering_angle" value="${vehicle?.max_steering_angle || ''}" step="0.1" min="1" max="89" placeholder="t.ex. 20"></div>
+
         <div class="field"><label>Anteckningar</label><textarea name="notes">${vehicle?.notes || ''}</textarea></div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
@@ -251,7 +365,8 @@ async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
   document.getElementById('vehicle-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target));
-    ['year', 'odometer', 'customer_id'].forEach(k => { body[k] = body[k] ? Number(body[k]) : null; });
+    ['year', 'odometer', 'customer_id', 'wheelbase_mm', 'width_mm', 'front_overhang_mm',
+     'rear_overhang_mm', 'max_steering_angle'].forEach(k => { body[k] = body[k] ? Number(body[k]) : null; });
     Object.keys(body).forEach(k => { if (body[k] === '') body[k] = null; });
     try {
       if (vehicle) {

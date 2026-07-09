@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey,
-    Numeric, Text, Boolean, Enum, BigInteger
+    Numeric, Text, Boolean, Enum, BigInteger, Float
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -125,6 +125,12 @@ class Vehicle(Base):
     utvaxling = Column(String)
     rotation = Column(String)
     medbringare = Column(String)
+    # Mått för svängradieberäkning (mm resp. grader)
+    wheelbase_mm = Column(Integer)
+    width_mm = Column(Integer)
+    front_overhang_mm = Column(Integer)
+    rear_overhang_mm = Column(Integer)
+    max_steering_angle = Column(Float)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 

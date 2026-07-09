@@ -40,6 +40,11 @@ def _run_migrations():
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS utvaxling VARCHAR",
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS rotation VARCHAR",
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS medbringare VARCHAR",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS wheelbase_mm INTEGER",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS width_mm INTEGER",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS front_overhang_mm INTEGER",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS rear_overhang_mm INTEGER",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS max_steering_angle DOUBLE PRECISION",
         # contact_persons
         """CREATE TABLE IF NOT EXISTS contact_persons (
             id SERIAL PRIMARY KEY,

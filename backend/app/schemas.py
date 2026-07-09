@@ -125,6 +125,11 @@ class VehicleCreate(BaseModel):
     utvaxling: Optional[str] = None
     rotation: Optional[str] = None
     medbringare: Optional[str] = None
+    wheelbase_mm: Optional[int] = None
+    width_mm: Optional[int] = None
+    front_overhang_mm: Optional[int] = None
+    rear_overhang_mm: Optional[int] = None
+    max_steering_angle: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -142,6 +147,11 @@ class VehicleUpdate(BaseModel):
     utvaxling: Optional[str] = None
     rotation: Optional[str] = None
     medbringare: Optional[str] = None
+    wheelbase_mm: Optional[int] = None
+    width_mm: Optional[int] = None
+    front_overhang_mm: Optional[int] = None
+    rear_overhang_mm: Optional[int] = None
+    max_steering_angle: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -161,6 +171,11 @@ class VehicleOut(BaseModel):
     utvaxling: Optional[str] = None
     rotation: Optional[str] = None
     medbringare: Optional[str] = None
+    wheelbase_mm: Optional[int] = None
+    width_mm: Optional[int] = None
+    front_overhang_mm: Optional[int] = None
+    rear_overhang_mm: Optional[int] = None
+    max_steering_angle: Optional[float] = None
     notes: Optional[str]
     created_at: datetime
     customer: Optional[CustomerOut] = None

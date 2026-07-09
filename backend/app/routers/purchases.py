@@ -10,7 +10,7 @@ from reportlab.pdfgen import canvas
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Purchase, PurchaseLine, WorkOrder, Settings, User
+from ..models import Purchase, PurchaseLine, WorkOrder, Settings, User, Article
 from ..schemas import PurchaseCreate, PurchaseUpdate, PurchaseOut
 from ..pdf_utils import draw_header
 
@@ -29,6 +29,34 @@ def _get(db: Session, order_id: int, purchase_id: int) -> Purchase:
     if not purchase:
         raise HTTPException(404, "Inköp ej hittat")
     return purchase
+
+
+def _resolve_line_article(db: Session, line: dict) -> None:
+    """Om en inköpsrad saknar lagerartikel men har ett artikelnummer angivet,
+    kopplas den till en befintlig artikel med det numret – eller så skapas en ny
+    artikel i registret. Muterar ``line`` in-place (sätter article_id).
+    """
+    if line.get("article_id"):
+        return
+    art_no = (line.get("article_number") or "").strip()
+    if not art_no:
+        return
+    existing = (
+        db.query(Article)
+        .filter(Article.article_number.ilike(art_no))
+        .first()
+    )
+    if existing:
+        line["article_id"] = existing.id
+        return
+    article = Article(
+        article_number=art_no,
+        name=(line.get("description") or "").strip() or art_no,
+        unit=line.get("unit") or "st",
+    )
+    db.add(article)
+    db.flush()
+    line["article_id"] = article.id
 
 
 def _next_purchase_number(db: Session) -> str:
@@ -80,7 +108,9 @@ def create_purchase(
     db.add(purchase)
     db.flush()
     for line in body.lines:
-        db.add(PurchaseLine(purchase_id=purchase.id, **line.model_dump()))
+        line_data = line.model_dump()
+        _resolve_line_article(db, line_data)
+        db.add(PurchaseLine(purchase_id=purchase.id, **line_data))
     db.commit()
     return _get(db, order_id, purchase.id)
 
@@ -103,6 +133,7 @@ def update_purchase(
         purchase.lines.clear()
         db.flush()
         for line in lines:
+            _resolve_line_article(db, line)
             db.add(PurchaseLine(purchase_id=purchase.id, **line))
     db.commit()
     return _get(db, order_id, purchase_id)

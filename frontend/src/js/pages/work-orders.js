@@ -904,6 +904,7 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
           <div id="pu-article-results" class="pl-results"></div>
           <div style="margin-top:6px">
             <button type="button" class="btn btn-ghost btn-sm" id="pu-add-free">+ Lägg till fri rad (utan lagerartikel)</button>
+            <div class="text-muted" style="font-size:12px;margin-top:4px">Anger du ett art.nr på en fri rad skapas artikeln automatiskt i artikelregistret.</div>
           </div>
         </div>
         <div class="field">
@@ -934,7 +935,9 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
     tbody.innerHTML = [...selected.entries()].map(([key, l]) => `
       <tr>
         <td>${l.article_id ? `<strong>${l.description}</strong>` : `<input type="text" value="${(l.description || '').replace(/"/g,'&quot;')}" data-desc="${key}" placeholder="Benämning" style="width:100%">`}</td>
-        <td class="font-mono text-muted">${l.article_number || '–'}</td>
+        <td>${l.article_id
+          ? `<span class="font-mono text-muted">${l.article_number || '–'}</span>`
+          : `<input type="text" value="${(l.article_number || '').replace(/"/g,'&quot;')}" data-artno="${key}" placeholder="Art.nr" style="width:100%" class="font-mono">`}</td>
         <td><input type="number" min="0.01" step="0.01" value="${l.quantity}" data-qty="${key}" style="width:70px"></td>
         <td><button type="button" class="btn-icon" data-remove="${key}">✕</button></td>
       </tr>
@@ -944,6 +947,9 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
     });
     tbody.querySelectorAll('[data-desc]').forEach(inp => {
       inp.addEventListener('input', () => { selected.get(inp.dataset.desc).description = inp.value; });
+    });
+    tbody.querySelectorAll('[data-artno]').forEach(inp => {
+      inp.addEventListener('input', () => { selected.get(inp.dataset.artno).article_number = inp.value.trim() || null; });
     });
     tbody.querySelectorAll('[data-remove]').forEach(btn => {
       btn.addEventListener('click', () => { selected.delete(btn.dataset.remove); renderLines(); });
@@ -1414,24 +1420,34 @@ function lineRow(l) {
 }
 
 function openAddLineForm(orderId, _articlesUnused, onSaved) {
-  let selectedArticle = null;
+  // Valda rader, keyade på artikel-id (aN) eller syntetisk nyckel för fri text (m…)
+  const selected = new Map();
+  let manualCounter = 0;
+
   openModal({
-    title: 'Lägg till artikel',
+    title: 'Lägg till artiklar',
+    size: 'modal-lg',
     body: `
       <form id="add-line-form">
         <div class="field">
-          <label>Sök artikel i lager (valfritt)</label>
+          <label>Sök artikel i lager att lägga till</label>
           <div class="search-wrap" style="max-width:none">
             <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
             <input type="search" id="line-article-search" placeholder="Namn, art.nr, plats…">
           </div>
           <div id="line-article-results" class="pl-results"></div>
-          <div id="line-article-selected" class="text-muted" style="font-size:12px;margin-top:4px"></div>
+          <div style="margin-top:6px">
+            <button type="button" class="btn btn-ghost btn-sm" id="line-add-free">+ Lägg till fri rad (utan lagerartikel)</button>
+          </div>
         </div>
-        <div class="field"><label>Beskrivning *</label><input type="text" name="description" required id="line-desc"></div>
-        <div class="form-row">
-          <div class="field"><label>Antal</label><input type="number" name="quantity" value="1" step="0.01" min="0.01" required></div>
-          <div class="field"><label>Enhet</label><input type="text" name="unit" value="st"></div>
+        <div class="field">
+          <label>Artiklar att lägga till (<span id="line-count">0</span>)</label>
+          <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+            <table>
+              <thead><tr><th>Benämning</th><th>Art.nr</th><th style="width:80px">Antal</th><th style="width:70px">Enhet</th><th></th></tr></thead>
+              <tbody id="line-lines-tbody"></tbody>
+            </table>
+          </div>
         </div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
@@ -1439,6 +1455,43 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
         </div>
       </form>
     `,
+  });
+
+  function renderLines() {
+    const tbody = document.getElementById('line-lines-tbody');
+    document.getElementById('line-count').textContent = selected.size;
+    if (!selected.size) {
+      tbody.innerHTML = `<tr><td colspan="5" class="text-muted" style="text-align:center;padding:16px">Inga artiklar valda</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = [...selected.entries()].map(([key, l]) => `
+      <tr>
+        <td>${l.article_id ? `<strong>${l.description}</strong>` : `<input type="text" value="${(l.description || '').replace(/"/g,'&quot;')}" data-desc="${key}" placeholder="Benämning" style="width:100%">`}</td>
+        <td class="font-mono text-muted">${l.article_number || '–'}</td>
+        <td><input type="number" min="0.01" step="0.01" value="${l.quantity}" data-qty="${key}" style="width:64px"></td>
+        <td><input type="text" value="${(l.unit || 'st').replace(/"/g,'&quot;')}" data-unit="${key}" style="width:56px"></td>
+        <td><button type="button" class="btn-icon" data-remove="${key}">✕</button></td>
+      </tr>
+    `).join('');
+    tbody.querySelectorAll('[data-qty]').forEach(inp => {
+      inp.addEventListener('input', () => { selected.get(inp.dataset.qty).quantity = parseFloat(inp.value) || 1; });
+    });
+    tbody.querySelectorAll('[data-unit]').forEach(inp => {
+      inp.addEventListener('input', () => { selected.get(inp.dataset.unit).unit = inp.value; });
+    });
+    tbody.querySelectorAll('[data-desc]').forEach(inp => {
+      inp.addEventListener('input', () => { selected.get(inp.dataset.desc).description = inp.value; });
+    });
+    tbody.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.addEventListener('click', () => { selected.delete(btn.dataset.remove); renderLines(); });
+    });
+  }
+  renderLines();
+
+  document.getElementById('line-add-free').addEventListener('click', () => {
+    const key = `m-new${++manualCounter}`;
+    selected.set(key, { article_id: null, description: '', article_number: null, quantity: 1, unit: 'st' });
+    renderLines();
   });
 
   const searchInput = document.getElementById('line-article-search');
@@ -1462,10 +1515,11 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
       resultsBox.querySelectorAll('[data-id]').forEach(row => {
         row.addEventListener('click', () => {
           const a = matches.find(x => x.id === parseInt(row.dataset.id));
-          selectedArticle = a;
-          document.getElementById('line-desc').value = a.name;
-          document.querySelector('[name="unit"]').value = a.unit || 'st';
-          document.getElementById('line-article-selected').textContent = `Vald: ${a.name} (${a.article_number || '–'})`;
+          const key = `a${a.id}`;
+          const cur = selected.get(key);
+          if (cur) cur.quantity += 1;
+          else selected.set(key, { article_id: a.id, description: a.name, article_number: a.article_number || null, quantity: 1, unit: a.unit || 'st' });
+          renderLines();
           searchInput.value = '';
           resultsBox.innerHTML = '';
           resultsBox.classList.remove('open');
@@ -1476,12 +1530,18 @@ function openAddLineForm(orderId, _articlesUnused, onSaved) {
 
   document.getElementById('add-line-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = Object.fromEntries(new FormData(e.target));
-    body.article_id = selectedArticle ? selectedArticle.id : null;
-    body.quantity = parseFloat(body.quantity);
+    const lines = [...selected.values()]
+      .filter(l => (l.description || '').trim())
+      .map(l => ({
+        article_id: l.article_id || null,
+        description: l.description.trim(),
+        quantity: l.quantity || 1,
+        unit: l.unit || 'st',
+      }));
+    if (!lines.length) { showToast('Lägg till minst en artikel', 'error'); return; }
     try {
-      await api.post(`/work-orders/${orderId}/lines`, body);
-      showToast('Rad tillagd', 'success');
+      await api.post(`/work-orders/${orderId}/lines/bulk`, { lines });
+      showToast(lines.length > 1 ? `${lines.length} rader tillagda` : 'Rad tillagd', 'success');
       closeModal();
       onSaved?.();
     } catch (err) { showToast(err.message, 'error'); }

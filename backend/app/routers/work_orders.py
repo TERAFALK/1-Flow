@@ -14,7 +14,8 @@ from ..deps import get_current_user
 from ..pdf_utils import draw_header
 from ..schemas import (
     WorkOrderCreate, WorkOrderUpdate, WorkOrderOut, WorkOrderListItem,
-    WorkOrderLineCreate, WorkOrderLineUpdate, WorkOrderLineOut, ScanResult,
+    WorkOrderLineCreate, WorkOrderLineUpdate, WorkOrderLineOut, WorkOrderLineBulkCreate,
+    ScanResult,
 )
 from ..models import (
     WorkOrder, WorkOrderLine, WorkOrderStatus, Article, StockTransaction,
@@ -221,6 +222,31 @@ def add_line(
         db.query(WorkOrderLine)
         .options(joinedload(WorkOrderLine.article))
         .get(line.id)
+    )
+
+
+@router.post("/{order_id}/lines/bulk", response_model=List[WorkOrderLineOut], status_code=status.HTTP_201_CREATED)
+def add_lines_bulk(
+    order_id: int,
+    body: WorkOrderLineBulkCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    if not db.get(WorkOrder, order_id):
+        raise HTTPException(status_code=404, detail="Arbetsorder ej hittad")
+    created_ids = []
+    for line in body.lines:
+        wl = WorkOrderLine(work_order_id=order_id, **line.model_dump())
+        db.add(wl)
+        db.flush()
+        created_ids.append(wl.id)
+    db.commit()
+    return (
+        db.query(WorkOrderLine)
+        .options(joinedload(WorkOrderLine.article))
+        .filter(WorkOrderLine.id.in_(created_ids))
+        .order_by(WorkOrderLine.id)
+        .all()
     )
 
 

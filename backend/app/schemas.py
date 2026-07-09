@@ -225,6 +225,10 @@ class WorkOrderLineCreate(BaseModel):
     unit_price: Decimal = Decimal("0")
 
 
+class WorkOrderLineBulkCreate(BaseModel):
+    lines: List[WorkOrderLineCreate] = []
+
+
 class WorkOrderLineUpdate(BaseModel):
     description: Optional[str] = None
     quantity: Optional[Decimal] = None

@@ -33,10 +33,18 @@ def list_articles(
 
 
 def _wipe_articles(db: Session):
+    """Tömmer artikelregistret utan att förstöra befintliga rader.
+
+    Alla rader som pekar på en artikel (delar/arbetsorder, inköpsrader, plockrader
+    och skanningar) behålls intakta – vi nollar bara deras article_id så att raderna
+    står kvar med sin benämning/art.nr. Detta måste ske för samtliga tabeller innan
+    artiklarna raderas, annars stoppar en FK-referens raderingen (HTTP 500).
+    """
     raw_conn = db.connection().connection
     cur = raw_conn.cursor()
     cur.execute("UPDATE work_order_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
     cur.execute("UPDATE pick_list_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
+    cur.execute("UPDATE purchase_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
     cur.execute("DELETE FROM stock_transactions")
     cur.execute("DELETE FROM articles")
     raw_conn.commit()

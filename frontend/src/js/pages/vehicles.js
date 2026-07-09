@@ -284,7 +284,8 @@ function loadAxleLoad(v) {
       </div>
       <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px">
         ${turnStat('Tankvikt', r.tank_weight, null, ' kg')}
-        ${turnStat('Tyngdpunkt (a)', r.cg, 'var(--accent)', ' mm')}
+        ${turnStat('TP från andra axeln', r.cg_axle2, 'var(--accent)', ' mm')}
+        ${turnStat('TP bakom framaxel', r.cg, null, ' mm')}
         ${turnStat('Tankens framkant', r.tank_front, null, ' mm')}
       </div>
       ${r.warnings && r.warnings.length ? `<div class="alert alert-warning" style="margin:0 0 12px">${r.warnings.map(w => `⚠ ${w}`).join('<br>')}</div>` : ''}
@@ -318,12 +319,15 @@ function axleSvg(r) {
   const tankBot = sil.tank_bot || (beamTop + 40), tankTop = sil.tank_top || (tankBot + 2000);
   const axles = (r.axle_offsets && r.axle_offsets.length >= 2) ? r.axle_offsets : [0, r.wheelbase];
   const rearRef = r.wheelbase;
+  const dims = r.dimensions || [];
+  const dimYs = dims.map(d => d.y);
   const cabFront = sil.cab ? sil.cab[0][0] : Math.min(0, ...axles) - 1400;
   const cabTop = sil.cab ? Math.max(...sil.cab.map(p => p[1])) : tankTop;
-  const W = 680, H = 320;
+  const W = 680, H = 340;
   const x0 = Math.min(0, r.tank_front, cabFront, ...axles) - 700;
   const x1 = Math.max(rearRef, r.tank_front + r.tank_length, ...axles) + 900;
-  const y0 = -700, y1 = Math.max(tankTop, cabTop) + 900;
+  const y0 = Math.min(-900, ...dimYs) - 60;
+  const y1 = Math.max(cabTop + 250, tankTop, ...dimYs) + 160;
   const s = Math.min((W - 20) / (x1 - x0), (H - 20) / (y1 - y0));
   const ox = (W - (x1 - x0) * s) / 2, oy = (H - (y1 - y0) * s) / 2;
   const T = (x, y) => [ox + (x - x0) * s, H - (oy + (y - y0) * s)];
@@ -341,6 +345,14 @@ function axleSvg(r) {
     return `<line x1="${a[0]}" y1="${a[1]}" x2="${z[0]}" y2="${z[1]}" stroke="var(--accent)" stroke-width="0.8" opacity="0.6"/>`;
   }).join('');
   const fenders = (sil.fenders || []).map(f => `<polyline points="${P(f)}" fill="none" stroke="#374151" stroke-width="2"/>`).join('');
+  const dimSvg = dims.map(d => {
+    const a = T(d.a, d.y), b = T(d.b, d.y), col = d.accent ? '#e5484d' : '#5a6675';
+    return `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${col}" stroke-width="0.8"/>
+      <line x1="${a[0]}" y1="${a[1] - 4}" x2="${a[0]}" y2="${a[1] + 4}" stroke="${col}" stroke-width="0.8"/>
+      <line x1="${b[0]}" y1="${b[1] - 4}" x2="${b[0]}" y2="${b[1] + 4}" stroke="${col}" stroke-width="0.8"/>
+      <text x="${(a[0] + b[0]) / 2}" y="${a[1] - 3}" text-anchor="middle" font-size="9" fill="${col}">${d.label}</text>`;
+  }).join('');
+  const wt = T(r.cg, tankTop + 560);
   return `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" font-family="inherit">
       <line x1="${T(x0, 0)[0]}" y1="${gy}" x2="${T(x1, 0)[0]}" y2="${gy}" stroke="#c3ccd6" stroke-width="1"/>
@@ -354,7 +366,9 @@ function axleSvg(r) {
       ${sil.bumper ? `<polygon points="${P(sil.bumper)}" fill="#475569"/>` : ''}
       <line x1="${cgBot[0]}" y1="${cgBot[1]}" x2="${cgTop[0]}" y2="${cgTop[1]}" stroke="#e5484d" stroke-width="1.4" stroke-dasharray="4 3"/>
       <circle cx="${cgTop[0]}" cy="${cgTop[1]}" r="4" fill="#e5484d"/>
-      <text x="${cgTop[0]}" y="${cgTop[1] - 6}" text-anchor="middle" font-size="9" font-weight="700" fill="#e5484d">TP</text>
+      <text x="${cgTop[0] + 6}" y="${cgTop[1] + 3}" font-size="9" font-weight="700" fill="#e5484d">TP</text>
+      <text x="${wt[0]}" y="${wt[1]}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#e5484d">${Math.round(r.tank_weight).toLocaleString('sv-SE')} kg</text>
+      ${dimSvg}
       ${axleLabel(0, 'Framaxel', r.load_front)} ${axleLabel(rearRef, 'Bakaxel', r.load_rear)}
     </svg>`;
 }

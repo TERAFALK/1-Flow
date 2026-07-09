@@ -316,8 +316,12 @@ def get_axle_load(
     out = r.to_dict()
     out["axle_offsets"] = offs
     out["front_overhang"] = float(vehicle.front_overhang_mm or 0)
+    axle2 = offs[1] if len(offs) >= 2 else L
+    out["cg_axle2"] = round(r.cg - axle2, 1)      # TP mätt från andra axeln
     out["silhouette"] = axleload.silhouette(
         float(vehicle.front_overhang_mm or 0), offs, r.tank_front, r.tank_length)
+    out["dimensions"] = axleload.dimensions(
+        float(vehicle.front_overhang_mm or 0), offs, L, r.tank_front, r.tank_length, r.cg)
     return out
 
 
@@ -363,10 +367,13 @@ def axle_load_pdf(
     rW = sil["wheel_r"]; beam_bot, beam_top = sil["beam_bot"], sil["beam_top"]
     tank_bot, tank_top = sil["tank_bot"], sil["tank_top"]
     cab_top = max(p[1] for p in sil["cab"])
+    dims = axleload.dimensions(float(vehicle.front_overhang_mm or 0), offs, L,
+                               r.tank_front, r.tank_length, r.cg)
     x_axles = offs if offs else [0.0, L]
     x0 = min(0.0, r.tank_front, min(x_axles), sil["cab"][0][0]) - 900
     x1 = max(rear_ref, r.tank_front + r.tank_length, max(x_axles)) + 1000
-    y0, y1 = -700.0, cab_top + 950
+    y0 = min(-900.0, *(d["y"] for d in dims)) - 60
+    y1 = max(cab_top + 250, *(d["y"] for d in dims)) + 160
 
     plot_left, plot_right = margin + 92 * mm, page_w - margin
     plot_top, plot_bottom = top - 4 * mm, margin + 6 * mm
@@ -425,19 +432,22 @@ def axle_load_pdf(
     c.line(*T(r.cg, beam_top), *T(r.cg, tank_top + 520)); c.setDash()
     cgx, cgy = T(r.cg, tank_top + 520)
     c.setFillColor(colors.HexColor("#e5484d")); c.circle(cgx, cgy, 4, fill=1, stroke=0)
-    c.setFont("Helvetica-Bold", 8); c.drawCentredString(cgx, cgy + 8, "TP")
+    c.setFont("Helvetica-Bold", 8); c.drawString(cgx + 6, cgy - 3, "TP")
+    wx, wy = T(r.cg, tank_top + 560)
+    c.setFont("Helvetica-Bold", 8.5); c.drawCentredString(wx, wy, kg(r.tank_weight))
 
-    def dim(xa, xb, yl, label):
+    def dim(xa, xb, yl, label, accent=False):
         ya = T(xa, yl)[1]
-        c.setStrokeColor(colors.HexColor("#5a6675")); c.setLineWidth(0.7)
+        col_ = colors.HexColor("#e5484d") if accent else colors.HexColor("#5a6675")
+        c.setStrokeColor(col_); c.setLineWidth(0.7)
         c.line(*T(xa, yl), *T(xb, yl))
         c.line(T(xa, yl)[0], ya - 4, T(xa, yl)[0], ya + 4)
         c.line(T(xb, yl)[0], ya - 4, T(xb, yl)[0], ya + 4)
-        c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor("#5a6675"))
+        c.setFont("Helvetica", 8); c.setFillColor(col_)
         c.drawCentredString((T(xa, yl)[0] + T(xb, yl)[0]) / 2, ya + 3, label)
 
-    dim(0, rear_ref, -480, "Hjulbas " + mm_(rear_ref))
-    dim(0, r.cg, tank_top + 660, "a = " + mm_(r.cg))
+    for d in dims:
+        dim(d["a"], d["b"], d["y"], d["label"], accent=d.get("accent", False))
 
     # axeletiketter
     c.setFillColor(colors.black); c.setFont("Helvetica-Bold", 8.5)
@@ -487,11 +497,13 @@ def axle_load_pdf(
     yy -= 20
 
     # tankdata
+    axle2 = offs[1] if len(offs) >= 2 else L
     c.setFillColor(colors.black); c.setFont("Helvetica-Bold", 9.5); c.drawString(px, yy, "Tankplacering"); yy -= 14
     for label, value in [
         ("Tankvikt", kg(r.tank_weight)),
         ("Tanklängd", mm_(r.tank_length)),
-        ("Tyngdpunkt (a) bakom framaxel", mm_(r.cg)),
+        ("Tyngdpunkt bakom andra axeln", mm_(r.cg - axle2)),
+        ("Tyngdpunkt bakom framaxeln", mm_(r.cg)),
         ("Tankens framkant bakom framaxel", mm_(r.tank_front)),
     ]:
         c.setFont("Helvetica", 8.5); c.setFillColor(colors.HexColor("#5a6675")); c.drawString(px, yy, label)

@@ -67,6 +67,35 @@ def _arc_pts(cx, cy, r, a0, a1, n=18):
             for a in [a0 + (a1 - a0) * i / n for i in range(n + 1)]]
 
 
+def dimensions(front_overhang: float, axle_offsets: List[float], wheelbase: float,
+               tank_front: float, tank_length: float, cg: float) -> List[dict]:
+    """Måttkedja i sidvyn (världskoordinater, mm). Varje mått: horisontell linje
+    mellan a→b på höjden y, med etikett. Delas av PDF och webbritning.
+
+    Tyngdpunkten (TP) måtts från **andra axeln** (drivaxeln), enligt kundens ritning.
+    """
+    offs = sorted(axle_offsets)
+    fo = front_overhang or 0.0
+    L = wheelbase
+    tank_top = BEAM_TOP + TANK_GAP + TANK_H
+    cab_top = BEAM_TOP + CAB_H
+    ax2 = offs[1] if len(offs) >= 2 else L
+    dims: List[dict] = []
+    # ── nedre måttkedja ──
+    if fo > 0:
+        dims.append({"a": -fo, "b": 0.0, "y": -430.0, "label": f"{fo:.0f}"})
+    dims.append({"a": 0.0, "b": ax2, "y": -430.0, "label": f"{ax2 - offs[0]:.0f}"})
+    if len(offs) >= 3:
+        dims.append({"a": offs[1], "b": offs[2], "y": -430.0, "label": f"{offs[2] - offs[1]:.0f}"})
+    dims.append({"a": 0.0, "b": L, "y": -680.0, "label": f"Techn. {L:.0f}"})
+    # ── övre måttkedja (högst upp) ──
+    dims.append({"a": 0.0, "b": tank_front, "y": tank_top + 980, "label": f"{tank_front:.0f}"})
+    dims.append({"a": tank_front, "b": tank_front + tank_length, "y": tank_top + 980, "label": f"{tank_length:.0f}"})
+    # ── TP från andra axeln (strax ovan tanken) ──
+    dims.append({"a": ax2, "b": cg, "y": tank_top + 230, "label": f"{cg - ax2:.0f}", "accent": True})
+    return dims
+
+
 def silhouette(front_overhang: float, axle_offsets: List[float],
                tank_front: float, tank_length: float) -> dict:
     """Bygger en lastbilssiluett i sidvy (hytt, vindruta, stötfångare, tank-baffler,

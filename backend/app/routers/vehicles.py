@@ -315,6 +315,9 @@ def get_axle_load(
     )
     out = r.to_dict()
     out["axle_offsets"] = offs
+    out["front_overhang"] = float(vehicle.front_overhang_mm or 0)
+    out["silhouette"] = axleload.silhouette(
+        float(vehicle.front_overhang_mm or 0), offs, r.tank_front, r.tank_length)
     return out
 
 
@@ -355,14 +358,15 @@ def axle_load_pdf(
     def mm_(v):
         return f"{v:,.0f} mm".replace(",", " ")
 
-    # ── Sidvy (höger) ──
-    rW = 520.0
-    beam_bot, beam_top = rW + 120, rW + 300
-    tank_bot, tank_top = beam_top + 40, beam_top + 40 + 2000.0
+    # ── Sidvy (höger) med lastbilssiluett ──
+    sil = axleload.silhouette(float(vehicle.front_overhang_mm or 0), offs, r.tank_front, r.tank_length)
+    rW = sil["wheel_r"]; beam_bot, beam_top = sil["beam_bot"], sil["beam_top"]
+    tank_bot, tank_top = sil["tank_bot"], sil["tank_top"]
+    cab_top = max(p[1] for p in sil["cab"])
     x_axles = offs if offs else [0.0, L]
-    x0 = min(0.0, r.tank_front, min(x_axles)) - 1100
-    x1 = max(rear_ref, r.tank_front + r.tank_length, max(x_axles)) + 1100
-    y0, y1 = -700.0, tank_top + 750
+    x0 = min(0.0, r.tank_front, min(x_axles), sil["cab"][0][0]) - 900
+    x1 = max(rear_ref, r.tank_front + r.tank_length, max(x_axles)) + 1000
+    y0, y1 = -700.0, cab_top + 950
 
     plot_left, plot_right = margin + 92 * mm, page_w - margin
     plot_top, plot_bottom = top - 4 * mm, margin + 6 * mm
@@ -373,6 +377,14 @@ def axle_load_pdf(
     def T(x, y):
         return (ox + (x - x0) * scale, oy + (y - y0) * scale)
 
+    def wpoly(pts, close=True):
+        p = c.beginPath(); p.moveTo(*T(*pts[0]))
+        for q in pts[1:]:
+            p.lineTo(*T(*q))
+        if close:
+            p.close()
+        return p
+
     # underlag
     c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.8)
     c.line(*T(x0, 0), *T(x1, 0))
@@ -380,17 +392,34 @@ def axle_load_pdf(
     c.setFillColor(colors.HexColor("#94a3b8"))
     (bx0, by0), (bx1, by1) = T(min(x_axles) - rW, beam_bot), T(max(x_axles) + rW, beam_top)
     c.rect(bx0, by0, bx1 - bx0, by1 - by0, fill=1, stroke=0)
-    # tank
+    # tank + baffler
     c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.18)
     c.setStrokeColor(colors.HexColor("#2f6fed")); c.setLineWidth(1.6)
     (tx0, ty0), (tx1, ty1) = T(r.tank_front, tank_bot), T(r.tank_front + r.tank_length, tank_top)
     c.roundRect(tx0, ty0, tx1 - tx0, ty1 - ty0, min(40, (ty1 - ty0) / 2), fill=1, stroke=1)
     c.setFillAlpha(1)
-    # hjul vid varje verklig axel
+    c.setStrokeColor(colors.HexColor("#2f6fed")); c.setLineWidth(0.6)
+    for b in sil["baffles"]:
+        c.line(*T(*b[0]), *T(*b[1]))
+    # hjul
     for ax in x_axles:
         cx, cy = T(ax, rW)
-        c.setFillColor(colors.HexColor("#374151")); c.circle(cx, cy, rW * scale, fill=1, stroke=0)
-        c.setFillColor(colors.HexColor("#9aa6b2")); c.circle(cx, cy, rW * scale * 0.42, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor("#1f2937")); c.circle(cx, cy, rW * scale, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor("#9aa6b2")); c.circle(cx, cy, rW * scale * 0.40, fill=1, stroke=0)
+    # stänkskärmar
+    c.setStrokeColor(colors.HexColor("#374151")); c.setLineWidth(1.6)
+    for f in sil["fenders"]:
+        c.drawPath(wpoly(f, close=False), fill=0, stroke=1)
+    # hytt
+    c.setFillColor(colors.HexColor("#cbd5e1")); c.setStrokeColor(colors.HexColor("#475569")); c.setLineWidth(1.4)
+    c.drawPath(wpoly(sil["cab"]), fill=1, stroke=1)
+    # vindruta
+    c.setFillColor(colors.HexColor("#7dd3fc")); c.setFillAlpha(0.55)
+    c.drawPath(wpoly(sil["windshield"]), fill=1, stroke=0); c.setFillAlpha(1)
+    # stötfångare
+    c.setFillColor(colors.HexColor("#475569"))
+    c.drawPath(wpoly(sil["bumper"]), fill=1, stroke=0)
+
     # tyngdpunkt
     c.setStrokeColor(colors.HexColor("#e5484d")); c.setLineWidth(1.4); c.setDash(4, 3)
     c.line(*T(r.cg, beam_top), *T(r.cg, tank_top + 520)); c.setDash()

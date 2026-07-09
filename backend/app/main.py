@@ -46,6 +46,7 @@ def _run_migrations():
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS rear_overhang_mm INTEGER",
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS max_steering_angle DOUBLE PRECISION",
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS axles JSONB",
+        "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS axle_load JSONB",
         # contact_persons
         """CREATE TABLE IF NOT EXISTS contact_persons (
             id SERIAL PRIMARY KEY,

@@ -136,6 +136,7 @@ class VehicleCreate(BaseModel):
     rear_overhang_mm: Optional[int] = None
     max_steering_angle: Optional[float] = None
     axles: Optional[List[AxleSpec]] = None
+    axle_load: Optional[dict] = None
     notes: Optional[str] = None
 
 
@@ -159,6 +160,7 @@ class VehicleUpdate(BaseModel):
     rear_overhang_mm: Optional[int] = None
     max_steering_angle: Optional[float] = None
     axles: Optional[List[AxleSpec]] = None
+    axle_load: Optional[dict] = None
     notes: Optional[str] = None
 
 
@@ -184,6 +186,7 @@ class VehicleOut(BaseModel):
     rear_overhang_mm: Optional[int] = None
     max_steering_angle: Optional[float] = None
     axles: Optional[List[AxleSpec]] = None
+    axle_load: Optional[dict] = None
     notes: Optional[str]
     created_at: datetime
     customer: Optional[CustomerOut] = None

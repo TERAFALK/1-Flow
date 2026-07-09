@@ -227,10 +227,13 @@ function loadAxleLoad(v) {
         <div class="field"><label>Totalvikt lastad (kg)</label><input type="number" id="al-lt" placeholder="hela fordonet med tank"></div>
 
         <div class="text-muted" style="font-size:11px;margin-bottom:8px">Hjulbas hämtas från fordonet (${v.wheelbase_mm ? v.wheelbase_mm + ' mm' : 'ej ifylld – fyll i under Redigera'}).</div>
-        <button class="btn btn-ghost btn-sm" id="al-pdf-btn">
-          <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
-          Ladda ner PDF (liggande)
-        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" id="al-save-btn">Spara indata</button>
+          <button class="btn btn-ghost btn-sm" id="al-pdf-btn">
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
+            Ladda ner PDF
+          </button>
+        </div>
       </div>
       <div id="al-result"><div class="text-muted" style="font-size:13px">Fyll i värdena så beräknas axeltrycken och tankens placering.</div></div>
     </div>`;
@@ -240,6 +243,12 @@ function loadAxleLoad(v) {
     empty_total: 'al-et', tank_length: 'al-tl', desired_front: 'al-df', desired_rear: 'al-dr',
     loaded_total: 'al-lt',
   };
+
+  // Förifyll från sparad indata
+  const saved = v.axle_load || {};
+  for (const [k, id] of Object.entries(fields)) {
+    if (saved[k] !== null && saved[k] !== undefined) document.getElementById(id).value = saved[k];
+  }
 
   function params() {
     const p = {};
@@ -289,34 +298,60 @@ function loadAxleLoad(v) {
     try { await downloadFile(`/vehicles/${v.id}/axle-load/pdf?${query(p)}`, `axeltryck-${v.license_plate}.pdf`); }
     catch (err) { showToast(err.message, 'error'); }
   });
+  document.getElementById('al-save-btn').addEventListener('click', async () => {
+    try {
+      const data = params();
+      await api.put(`/vehicles/${v.id}`, { axle_load: data });
+      v.axle_load = data;
+      showToast('Indata sparad', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  if (Object.values(params()).every(x => x !== null)) recompute();
 }
 
 function axleSvg(r) {
-  // Sidvy: framaxel x=0, bakre referens = sista axeln. Verkliga axelpositioner ritas.
-  const W = 660, H = 300;
-  const rW = 520, beamBot = rW + 120, beamTop = rW + 300;
-  const tankBot = beamTop + 40, tankTop = tankBot + 2000;
+  // Sidvy med lastbilssiluett. Siluettpunkterna kommer från servern (mm, y uppåt).
+  const sil = r.silhouette || {};
+  const rW = sil.wheel_r || 520;
+  const beamBot = sil.beam_bot || 640, beamTop = sil.beam_top || 820;
+  const tankBot = sil.tank_bot || (beamTop + 40), tankTop = sil.tank_top || (tankBot + 2000);
   const axles = (r.axle_offsets && r.axle_offsets.length >= 2) ? r.axle_offsets : [0, r.wheelbase];
-  const rearRef = r.wheelbase;   // bakaxelgruppens centrum = lastreferens
-  const x0 = Math.min(0, r.tank_front, ...axles) - 1100, x1 = Math.max(rearRef, r.tank_front + r.tank_length, ...axles) + 1100;
-  const y0 = -700, y1 = tankTop + 750;
+  const rearRef = r.wheelbase;
+  const cabFront = sil.cab ? sil.cab[0][0] : Math.min(0, ...axles) - 1400;
+  const cabTop = sil.cab ? Math.max(...sil.cab.map(p => p[1])) : tankTop;
+  const W = 680, H = 320;
+  const x0 = Math.min(0, r.tank_front, cabFront, ...axles) - 700;
+  const x1 = Math.max(rearRef, r.tank_front + r.tank_length, ...axles) + 900;
+  const y0 = -700, y1 = Math.max(tankTop, cabTop) + 900;
   const s = Math.min((W - 20) / (x1 - x0), (H - 20) / (y1 - y0));
   const ox = (W - (x1 - x0) * s) / 2, oy = (H - (y1 - y0) * s) / 2;
   const T = (x, y) => [ox + (x - x0) * s, H - (oy + (y - y0) * s)];
+  const P = pts => pts.map(p => T(p[0], p[1]).join(',')).join(' ');
   const gy = T(x0, 0)[1];
   const [bx0, by0] = T(Math.min(...axles) - rW, beamTop), [bx1] = T(Math.max(...axles) + rW, beamBot);
   const [tx0, ty0] = T(r.tank_front, tankTop), [tx1, ty1] = T(r.tank_front + r.tank_length, tankBot);
-  const wheel = ax => { const [cx, cy] = T(ax, rW); return `<circle cx="${cx}" cy="${cy}" r="${rW * s}" fill="#374151"/><circle cx="${cx}" cy="${cy}" r="${rW * s * 0.42}" fill="#9aa6b2"/>`; };
+  const wheel = ax => { const [cx, cy] = T(ax, rW); return `<circle cx="${cx}" cy="${cy}" r="${rW * s}" fill="#1f2937"/><circle cx="${cx}" cy="${cy}" r="${rW * s * 0.4}" fill="#9aa6b2"/>`; };
   const cgTop = T(r.cg, tankTop + 500), cgBot = T(r.cg, beamTop);
   const axleLabel = (ax, name, load) => { const [lx] = T(ax, 0); const ly = T(ax, -150)[1], ly2 = T(ax, -320)[1];
     return `<text x="${lx}" y="${ly}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text-2)">${name}</text>
             <text x="${lx}" y="${ly2}" text-anchor="middle" font-size="10" fill="#e5484d">${Math.round(load).toLocaleString('sv-SE')} kg</text>`; };
+  const baffles = (sil.baffles || []).map(b => {
+    const a = T(b[0][0], b[0][1]), z = T(b[1][0], b[1][1]);
+    return `<line x1="${a[0]}" y1="${a[1]}" x2="${z[0]}" y2="${z[1]}" stroke="var(--accent)" stroke-width="0.8" opacity="0.6"/>`;
+  }).join('');
+  const fenders = (sil.fenders || []).map(f => `<polyline points="${P(f)}" fill="none" stroke="#374151" stroke-width="2"/>`).join('');
   return `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" font-family="inherit">
       <line x1="${T(x0, 0)[0]}" y1="${gy}" x2="${T(x1, 0)[0]}" y2="${gy}" stroke="#c3ccd6" stroke-width="1"/>
       <rect x="${bx0}" y="${by0}" width="${bx1 - bx0}" height="${T(0, beamBot)[1] - by0}" fill="#94a3b8"/>
-      ${axles.map(wheel).join('')}
       <rect x="${tx0}" y="${ty0}" width="${tx1 - tx0}" height="${ty1 - ty0}" rx="10" fill="var(--accent)" fill-opacity="0.18" stroke="var(--accent)" stroke-width="1.6"/>
+      ${baffles}
+      ${axles.map(wheel).join('')}
+      ${fenders}
+      ${sil.cab ? `<polygon points="${P(sil.cab)}" fill="#cbd5e1" stroke="#475569" stroke-width="1.4"/>` : ''}
+      ${sil.windshield ? `<polygon points="${P(sil.windshield)}" fill="#7dd3fc" fill-opacity="0.55"/>` : ''}
+      ${sil.bumper ? `<polygon points="${P(sil.bumper)}" fill="#475569"/>` : ''}
       <line x1="${cgBot[0]}" y1="${cgBot[1]}" x2="${cgTop[0]}" y2="${cgTop[1]}" stroke="#e5484d" stroke-width="1.4" stroke-dasharray="4 3"/>
       <circle cx="${cgTop[0]}" cy="${cgTop[1]}" r="4" fill="#e5484d"/>
       <text x="${cgTop[0]}" y="${cgTop[1] - 6}" text-anchor="middle" font-size="9" font-weight="700" fill="#e5484d">TP</text>

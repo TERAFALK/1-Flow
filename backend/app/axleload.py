@@ -48,6 +48,75 @@ def _pct(part, whole):
     return round(100 * part / whole, 1) if whole else 0.0
 
 
+# ── Sidvys-geometri (lastbilssiluett) ─────────────────────────────────────────
+# Visuella konstanter (mm) delade av PDF och webbritning. Framaxel = x 0,
+# bakåt = +x, marken = y 0, y uppåt.
+WHEEL_R = 520.0
+BEAM_BOT = 640.0
+BEAM_TOP = 820.0
+TANK_GAP = 40.0
+TANK_H = 2000.0
+CAB_LEN = 2350.0
+CAB_H = 2500.0
+CAB_BEVEL = 420.0
+
+
+def _arc_pts(cx, cy, r, a0, a1, n=18):
+    import math
+    return [(cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
+            for a in [a0 + (a1 - a0) * i / n for i in range(n + 1)]]
+
+
+def silhouette(front_overhang: float, axle_offsets: List[float],
+               tank_front: float, tank_length: float) -> dict:
+    """Bygger en lastbilssiluett i sidvy (hytt, vindruta, stötfångare, tank-baffler,
+    stänkskärmar) i världskoordinater (mm, y uppåt). Delas av PDF och webbritning."""
+    fo = front_overhang or 1400.0
+    cab_front = -fo
+    cab_back = cab_front + CAB_LEN
+    cab_top = BEAM_TOP + CAB_H
+    tank_bot = BEAM_TOP + TANK_GAP
+    tank_top = tank_bot + TANK_H
+
+    cab = [
+        (cab_front, BEAM_TOP),
+        (cab_front, cab_top - CAB_BEVEL),
+        (cab_front + CAB_BEVEL, cab_top),
+        (cab_back, cab_top),
+        (cab_back, BEAM_TOP),
+    ]
+    windshield = [
+        (cab_front + 210, cab_top - 210),
+        (cab_front + 1180, cab_top - 210),
+        (cab_front + 1180, cab_top - 830),
+        (cab_front + 470, cab_top - 830),
+    ]
+    bumper = [
+        (cab_front - 150, 300.0),
+        (cab_front + 160, 300.0),
+        (cab_front + 160, 720.0),
+        (cab_front - 150, 720.0),
+    ]
+    baffles = [
+        [(tank_front + tank_length * f, tank_bot + 130), (tank_front + tank_length * f, tank_top - 130)]
+        for f in (0.30, 0.5, 0.70)
+    ]
+    fenders = [_arc_pts(cx, WHEEL_R, WHEEL_R * 1.22, 8, 172) for cx in axle_offsets]
+
+    return {
+        "cab": cab,
+        "windshield": windshield,
+        "bumper": bumper,
+        "baffles": baffles,
+        "fenders": fenders,
+        "beam_top": BEAM_TOP,
+        "beam_bot": BEAM_BOT,
+        "tank_bot": tank_bot,
+        "tank_top": tank_top,
+        "wheel_r": WHEEL_R,
+    }
+
+
 def compute(
     wheelbase: float,
     empty_front: float,

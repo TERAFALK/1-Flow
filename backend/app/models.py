@@ -133,6 +133,8 @@ class Vehicle(Base):
     max_steering_angle = Column(Float)
     # Axelkonfiguration: [{"offset_mm": int, "steered": bool}, ...] (främre axel offset 0)
     axles = Column(JSON)
+    # Sparad indata för axeltryck/tankplacering (fritt dict, se axleload.compute)
+    axle_load = Column(JSON)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -202,15 +202,17 @@ def turning_pdf(
     c.setStrokeColor(colors.HexColor("#9aa6b2")); c.setLineWidth(1.0); c.setDash(4, 3)
     c.drawPath(poly(res.ghost), fill=0, stroke=1); c.setDash()
 
-    # Lastbil
+    # Lastbil – hjul underst
+    c.setFillColor(colors.HexColor("#374151"))
+    for w in res.wheels:
+        c.drawPath(poly(w), fill=1, stroke=0)
+    # chassi
     c.setStrokeColor(colors.HexColor("#2f6fed")); c.setLineWidth(1.8)
     c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.08)
     c.drawPath(poly(res.body), fill=1, stroke=1); c.setFillAlpha(1)
-    c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.20)
-    c.drawPath(poly(res.cab), fill=1, stroke=0); c.setFillAlpha(1)
-    c.setStrokeColor(colors.HexColor("#2f6fed")); c.setLineWidth(3.5)
-    c.line(*T(res.axle_front[0]), *T(res.axle_front[1]))
-    c.line(*T(res.axle_rear[0]), *T(res.axle_rear[1]))
+    # hytt
+    c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.28)
+    c.drawPath(poly(res.cab), fill=1, stroke=1); c.setFillAlpha(1)
 
     # Vändcentrum
     c.setFillColor(colors.HexColor("#e5484d"))
@@ -219,15 +221,21 @@ def turning_pdf(
     # ── Infopanel (vänster) ──
     px, pw = margin, 70 * mm
     py_top = top - 6 * mm
+    n_axles = len(res.axle_angles)
+    n_steered = sum(1 for a in res.axle_angles if a["steered"])
     rows = [
-        ("Styrvinkel", f"{res.steering_angle:g}°"),
-        ("Hjulbas", f"{vehicle.wheelbase_mm} mm"),
+        ("Styrvinkel fram", f"{res.steering_angle:g}°"),
+        ("Antal axlar", f"{n_axles} ({n_steered} styrbara)"),
         ("Bredd", f"{vehicle.width_mm} mm"),
         ("Ytterradie R ut", f"{res.r_out:,.0f} mm".replace(",", " ")),
         ("Innerradie R in", f"{res.r_in:,.0f} mm".replace(",", " ")),
         ("Framaxel R fram", f"{res.r_front:,.0f} mm".replace(",", " ")),
         ("Svepbredd", f"{res.swept_width:,.0f} mm".replace(",", " ")),
     ]
+    # Extra rad per styrbar axel utöver den främre
+    for i, a in enumerate(res.axle_angles):
+        if a["steered"] and i > 0:
+            rows.append((f"Styrvinkel axel {i+1}", f"{a['angle']:g}°"))
     ph = 16 + len(rows) * 15
     c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.05)
     c.roundRect(px, py_top - ph, pw, ph, 6, fill=1, stroke=0); c.setFillAlpha(1)

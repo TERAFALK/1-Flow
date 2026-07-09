@@ -225,7 +225,9 @@ function loadTurning(v) {
           ${turnStat('Innerradie R in', res.r_in, '#12a150')}
           ${turnStat('Framaxel R fram', res.r_front)}
           ${turnStat('Svepbredd', res.swept_width)}
-          ${turnStat('Styrvinkel', res.steering_angle, null, '°', 1)}
+          ${turnStat('Styrvinkel fram', res.steering_angle, null, '°', 1)}
+          ${(res.axle_angles || []).filter((a, i) => a.steered && i > 0).map((a) =>
+            turnStat(`Styrvinkel axel ${res.axle_angles.indexOf(a) + 1}`, a.angle, '#e5484d', '°', 1)).join('')}
         </div>
         <div style="min-width:0;overflow-x:auto">${turningSvg(res)}</div>
       </div>`;
@@ -264,16 +266,16 @@ function turningSvg(res) {
   const pts = arr => arr.map(p => T(p).map(n => n.toFixed(1)).join(',')).join(' ');
   const band = [...res.arc_out, ...res.arc_in.slice().reverse()];
   const cen = T(res.center);
+  const wheels = (res.wheels || []).map(w => `<polygon points="${pts(w)}" fill="#374151"/>`).join('');
   return `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" font-family="inherit">
       <polygon points="${pts(band)}" fill="var(--accent)" opacity="0.10"/>
       <polyline points="${pts(res.arc_out)}" fill="none" stroke="var(--accent)" stroke-width="2"/>
       <polyline points="${pts(res.arc_in)}" fill="none" stroke="#12a150" stroke-width="2"/>
       <polygon points="${pts(res.ghost)}" fill="none" stroke="#9aa6b2" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.8"/>
+      ${wheels}
       <polygon points="${pts(res.body)}" fill="var(--accent)" fill-opacity="0.08" stroke="var(--accent)" stroke-width="2"/>
-      <polygon points="${pts(res.cab)}" fill="var(--accent)" opacity="0.2"/>
-      <line x1="${T(res.axle_front[0])[0]}" y1="${T(res.axle_front[0])[1]}" x2="${T(res.axle_front[1])[0]}" y2="${T(res.axle_front[1])[1]}" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
-      <line x1="${T(res.axle_rear[0])[0]}" y1="${T(res.axle_rear[0])[1]}" x2="${T(res.axle_rear[1])[0]}" y2="${T(res.axle_rear[1])[1]}" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+      <polygon points="${pts(res.cab)}" fill="var(--accent)" opacity="0.28" stroke="var(--accent)" stroke-width="1"/>
       <circle cx="${cen[0]}" cy="${cen[1]}" r="4" fill="#e5484d"/>
     </svg>`;
 }
@@ -304,6 +306,14 @@ function metaRow(label, value) {
 
 async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
   const customers = await api.get('/customers');
+
+  // Startvärden för axelkonfigurationen (offset i mm från främre axeln)
+  const initAxles = (vehicle?.axles && vehicle.axles.length >= 2)
+    ? vehicle.axles.map(a => ({ offset: a.offset_mm ?? a.offset ?? 0, steered: !!a.steered }))
+    : (vehicle?.wheelbase_mm
+        ? [{ offset: 0, steered: true }, { offset: vehicle.wheelbase_mm, steered: false }]
+        : [{ offset: 0, steered: true }, { offset: 4000, steered: false }]);
+
   openModal({
     title: vehicle ? 'Redigera fordon' : 'Nytt fordon',
     size: 'modal-lg',
@@ -344,14 +354,19 @@ async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
         <hr class="divider">
         <div class="text-muted" style="font-size:12px;margin-bottom:8px">Svängradiemått (för beräkning)</div>
         <div class="form-row">
-          <div class="field"><label>Hjulbas (mm)</label><input type="number" name="wheelbase_mm" value="${vehicle?.wheelbase_mm || ''}" placeholder="t.ex. 5300"></div>
           <div class="field"><label>Bredd (mm)</label><input type="number" name="width_mm" value="${vehicle?.width_mm || ''}" placeholder="t.ex. 2550"></div>
+          <div class="field"><label>Max styrvinkel fram (°)</label><input type="number" name="max_steering_angle" value="${vehicle?.max_steering_angle || ''}" step="0.1" min="1" max="89" placeholder="t.ex. 20"></div>
         </div>
         <div class="form-row">
           <div class="field"><label>Framskjut (mm)</label><input type="number" name="front_overhang_mm" value="${vehicle?.front_overhang_mm || ''}" placeholder="framaxel → front"></div>
-          <div class="field"><label>Bakskjut (mm)</label><input type="number" name="rear_overhang_mm" value="${vehicle?.rear_overhang_mm || ''}" placeholder="bakaxel → bak"></div>
+          <div class="field"><label>Bakskjut (mm)</label><input type="number" name="rear_overhang_mm" value="${vehicle?.rear_overhang_mm || ''}" placeholder="bakre axel → bak"></div>
         </div>
-        <div class="field"><label>Max styrvinkel (°)</label><input type="number" name="max_steering_angle" value="${vehicle?.max_steering_angle || ''}" step="0.1" min="1" max="89" placeholder="t.ex. 20"></div>
+        <div class="field" style="max-width:200px">
+          <label>Antal axlar</label>
+          <select id="axle-count">${[2,3,4,5,6].map(n => `<option value="${n}" ${n === initAxles.length ? 'selected' : ''}>${n}</option>`).join('')}</select>
+        </div>
+        <div id="axle-rows" style="margin-bottom:4px"></div>
+        <div class="text-muted" style="font-size:11px;margin-bottom:8px">Ange avstånd från föregående axel. Markera vilka axlar som är styrbara (en styrd bakre axel minskar svepbredden).</div>
 
         <div class="field"><label>Anteckningar</label><textarea name="notes">${vehicle?.notes || ''}</textarea></div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
@@ -362,12 +377,50 @@ async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
     `,
   });
 
+  // ── Axelrader (dynamiskt utifrån antal axlar) ──
+  const axleCountSel = document.getElementById('axle-count');
+  function renderAxleRows(n) {
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      const ax = initAxles[i];
+      const spacing = (i > 0 && ax && initAxles[i - 1]) ? Math.max(1, ax.offset - initAxles[i - 1].offset) : (i > 0 ? 1400 : 0);
+      const steered = ax ? ax.steered : false;
+      rows.push(`
+        <div class="form-row" style="align-items:flex-end;margin-bottom:6px">
+          <div class="field" style="margin:0">
+            <label>${i === 0 ? 'Axel 1 · framaxel' : 'Axel ' + (i + 1) + ' · avstånd (mm)'}</label>
+            ${i === 0
+              ? '<input type="text" value="0 (referens)" disabled style="opacity:.55">'
+              : `<input type="number" data-spacing="${i}" value="${spacing}" min="1" placeholder="från föreg. axel">`}
+          </div>
+          <div class="field" style="margin:0;max-width:120px">
+            <label style="font-size:12px;white-space:nowrap"><input type="checkbox" data-steered="${i}" ${steered ? 'checked' : ''}> Styrbar</label>
+          </div>
+        </div>`);
+    }
+    document.getElementById('axle-rows').innerHTML = rows.join('');
+  }
+  renderAxleRows(initAxles.length);
+  axleCountSel.addEventListener('change', () => renderAxleRows(parseInt(axleCountSel.value)));
+
   document.getElementById('vehicle-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target));
     ['year', 'odometer', 'customer_id', 'wheelbase_mm', 'width_mm', 'front_overhang_mm',
      'rear_overhang_mm', 'max_steering_angle'].forEach(k => { body[k] = body[k] ? Number(body[k]) : null; });
     Object.keys(body).forEach(k => { if (body[k] === '') body[k] = null; });
+
+    // Bygg axelkonfigurationen från raderna
+    const n = parseInt(axleCountSel.value);
+    const axles = [];
+    let offset = 0;
+    for (let i = 0; i < n; i++) {
+      if (i > 0) offset += Math.max(0, parseFloat(document.querySelector(`[data-spacing="${i}"]`)?.value) || 0);
+      const steered = document.querySelector(`[data-steered="${i}"]`)?.checked || false;
+      axles.push({ offset_mm: Math.round(offset), steered });
+    }
+    body.axles = axles;
+    body.wheelbase_mm = axles[1] ? axles[1].offset_mm : null;  // bakåtkompat: hjulbas = axel 1→2
     try {
       if (vehicle) {
         await api.put(`/vehicles/${vehicle.id}`, body);

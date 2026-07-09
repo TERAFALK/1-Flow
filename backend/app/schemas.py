@@ -111,6 +111,11 @@ class ContactPersonOut(BaseModel):
 
 # ── Vehicles ──────────────────────────────────────────────────────────────────
 
+class AxleSpec(BaseModel):
+    offset_mm: int          # avstånd bakom främre axeln (främre axeln = 0)
+    steered: bool = False
+
+
 class VehicleCreate(BaseModel):
     customer_id: int
     license_plate: str
@@ -130,6 +135,7 @@ class VehicleCreate(BaseModel):
     front_overhang_mm: Optional[int] = None
     rear_overhang_mm: Optional[int] = None
     max_steering_angle: Optional[float] = None
+    axles: Optional[List[AxleSpec]] = None
     notes: Optional[str] = None
 
 
@@ -152,6 +158,7 @@ class VehicleUpdate(BaseModel):
     front_overhang_mm: Optional[int] = None
     rear_overhang_mm: Optional[int] = None
     max_steering_angle: Optional[float] = None
+    axles: Optional[List[AxleSpec]] = None
     notes: Optional[str] = None
 
 
@@ -176,6 +183,7 @@ class VehicleOut(BaseModel):
     front_overhang_mm: Optional[int] = None
     rear_overhang_mm: Optional[int] = None
     max_steering_angle: Optional[float] = None
+    axles: Optional[List[AxleSpec]] = None
     notes: Optional[str]
     created_at: datetime
     customer: Optional[CustomerOut] = None

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey,
-    Numeric, Text, Boolean, Enum, BigInteger, Float
+    Numeric, Text, Boolean, Enum, BigInteger, Float, JSON
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -131,6 +131,8 @@ class Vehicle(Base):
     front_overhang_mm = Column(Integer)
     rear_overhang_mm = Column(Integer)
     max_steering_angle = Column(Float)
+    # Axelkonfiguration: [{"offset_mm": int, "steered": bool}, ...] (främre axel offset 0)
+    axles = Column(JSON)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 

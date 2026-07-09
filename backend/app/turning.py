@@ -1,37 +1,45 @@
-"""Svängradieberäkning (swept path / offtracking) för stel lastbil.
+"""Svängradieberäkning (swept path / offtracking) för stel lastbil med
+godtyckligt antal axlar och en eller flera styrbara axlar.
 
-Ren geometri – inga ramverksberoenden, enkel att enhetstesta. Modellen är
-steady-state (konstant radie): fordonet kör runt en cirkel och vi räknar ut
-ytter- och innerradie samt sveper ut karossens konturpunkter.
+Modellen är steady-state (konstant radie) enligt lågfartsgeometrin som t.ex.
+CornerWin använder:
 
-Formler (Ackermann-geometri, en stel enhet):
-    R_bakaxel = L / tan(δ)
-    R_in      = R_bakaxel − W/2                       (inre svepradie)
-    R_ut      = √((R_bakaxel + W/2)² + (L + a_f)²)     (yttre främre hörn)
-    R_fram    = L / sin(δ)                             (framaxelns radie)
+* De **fasta** (icke-styrbara) axlarna kan inte alla vara tangenta till samma
+  cirkel – vändcentrum läggs på linjen genom deras geometriska mittpunkt
+  (bogie-centrum), ``u_c``.
+* **Effektiv hjulbas** ``L_eff = u_c − u_styr`` där ``u_styr`` är främre
+  styrande axeln. ``R = L_eff / tan(δ)`` (radie till centrumlinjen vid ``u_c``).
+* Varje styrbar axel får sin ideala vinkel ``δᵢ = atan((u_c − uᵢ) / R)``.
+* ``R_in = R − W/2``  och  ``R_ut = max(hörnavstånd från vändcentrum)``.
 
-Alla längder i mm, vinklar i grader. Koordinatpunkterna returneras i ett
-system där vändcentrum ligger i origo och y pekar uppåt (matematisk).
+Alla längder i mm, vinklar i grader. Punkter returneras i ett system där
+vändcentrum ligger i origo och y pekar uppåt (matematisk).
 """
 import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import List, Tuple, Optional
 
 Point = Tuple[float, float]
 
 
 @dataclass
+class Axle:
+    offset: float          # mm bakom främre axeln (främre axeln = 0)
+    steered: bool = False
+
+
+@dataclass
 class TruckDims:
-    wheelbase: float          # L  – hjulbas (framaxel → bakaxel)
-    width: float              # W  – total bredd
-    front_overhang: float = 0.0   # a_f – framaxel → front
-    rear_overhang: float = 0.0    # a_r – bakaxel → bak
+    axles: List[Axle]
+    width: float
+    front_overhang: float = 0.0    # främre axel → front
+    rear_overhang: float = 0.0     # bakre axel → bak
 
 
 @dataclass
 class TurningResult:
     steering_angle: float
-    r_rear: float
+    r_rear: float          # radie till referenspunkten (fasta axlarnas centrum)
     r_front: float
     r_out: float
     r_in: float
@@ -42,24 +50,14 @@ class TurningResult:
     body: List[Point]
     cab: List[Point]
     ghost: List[Point]
-    axle_front: List[Point]
-    axle_rear: List[Point]
+    wheels: List[List[Point]]
+    axle_angles: List[dict]
 
     def to_dict(self):
         return asdict(self)
 
 
-def _point(r_rear: float, phi: float, l: float, w: float) -> Point:
-    """Punkt med längdoffset ``l`` (framåt +) och sidooffset ``w`` (utåt +)
-    relativt bakaxelns mitt, när fordonet befinner sig vid svängvinkeln ``phi``."""
-    ur = (math.cos(phi), math.sin(phi))     # radiellt utåt
-    ut = (-math.sin(phi), math.cos(phi))    # framåt (tangent)
-    x = (r_rear + w) * ur[0] + l * ut[0]
-    y = (r_rear + w) * ur[1] + l * ut[1]
-    return (x, y)
-
-
-def _arc(r: float, a0: float, a1: float, n: int = 64) -> List[Point]:
+def _arc(r: float, a0: float, a1: float, n: int = 72) -> List[Point]:
     return [
         (r * math.cos(a0 + (a1 - a0) * i / n), r * math.sin(a0 + (a1 - a0) * i / n))
         for i in range(n + 1)
@@ -69,47 +67,80 @@ def _arc(r: float, a0: float, a1: float, n: int = 64) -> List[Point]:
 def compute(
     dims: TruckDims,
     steering_angle_deg: float,
-    sweep_deg: float = 50.0,
-    ghost_deg: float = 9.0,
+    sweep_deg: float = 45.0,
+    ghost_deg: float = 8.0,
     arc_span_deg: Tuple[float, float] = (4.0, 90.0),
 ) -> TurningResult:
-    if dims.wheelbase <= 0 or dims.width <= 0:
-        raise ValueError("Hjulbas och bredd måste vara större än noll")
+    axles = sorted(dims.axles, key=lambda a: a.offset)
+    W = dims.width
+    fo, ro = dims.front_overhang, dims.rear_overhang
+    if len(axles) < 2:
+        raise ValueError("Minst två axlar krävs")
+    if W <= 0:
+        raise ValueError("Bredd måste vara större än noll")
     if not (0 < steering_angle_deg < 90):
         raise ValueError("Styrvinkeln måste vara mellan 0 och 90 grader")
 
-    d = math.radians(steering_angle_deg)
-    L, W = dims.wheelbase, dims.width
-    af, ar = dims.front_overhang, dims.rear_overhang
+    steered = [a for a in axles if a.steered]
+    ref_group = [a for a in axles if not a.steered] or axles  # fasta axlar (annars alla)
+    u_c = sum(a.offset for a in ref_group) / len(ref_group)
+    primary = min(steered, key=lambda a: a.offset) if steered else axles[0]
+    u_s = primary.offset
+    L_eff = u_c - u_s
+    if L_eff <= 0:
+        raise ValueError("Den styrande axeln måste ligga framför de fasta axlarna")
 
-    r_rear = L / math.tan(d)
-    r_front = L / math.sin(d)
-    r_in = r_rear - W / 2
-    r_out = math.hypot(r_rear + W / 2, L + af)
+    d = math.radians(steering_angle_deg)
+    R = L_eff / math.tan(d)                      # radie till centrumlinjen vid u_c
+    u_front, u_end = -fo, axles[-1].offset + ro
+
+    def dist(u, y):
+        return math.hypot(u - u_c, R - y)
+
+    corners = [(u_front, W / 2), (u_front, -W / 2), (u_end, -W / 2), (u_end, W / 2)]
+    r_out = max(dist(u, y) for u, y in corners)
+    r_in = R - W / 2
+    r_front = math.hypot(u_s - u_c, R)           # = L_eff / sin(d)
     swept = r_out - r_in
 
-    a0, a1 = math.radians(arc_span_deg[0]), math.radians(arc_span_deg[1])
+    # --- Transform: kroppspunkt (u bakåt+, y sidled+) → världskoord vid svängvinkel phi ---
+    def T(u, y, phi):
+        c, s = math.cos(phi), math.sin(phi)
+        return ((R - y) * c - (u_c - u) * s, (R - y) * s + (u_c - u) * c)
+
     phi = math.radians(sweep_deg)
     gphi = math.radians(ghost_deg)
 
-    def body_at(p: float) -> List[Point]:
-        return [
-            _point(r_rear, p, L + af, W / 2),
-            _point(r_rear, p, L + af, -W / 2),
-            _point(r_rear, p, -ar, -W / 2),
-            _point(r_rear, p, -ar, W / 2),
-        ]
+    def rect(u0, u1, y0, y1, p):
+        return [T(u0, y0, p), T(u1, y0, p), T(u1, y1, p), T(u0, y1, p)]
 
-    cab = [
-        _point(r_rear, phi, L + af, W / 2 * 0.92),
-        _point(r_rear, phi, L + af, -W / 2 * 0.92),
-        _point(r_rear, phi, L - 0.3, -W / 2 * 0.92),
-        _point(r_rear, phi, L - 0.3, W / 2 * 0.92),
-    ]
+    body = rect(u_front, u_end, -W / 2, W / 2, phi)
+    ghost = rect(u_front, u_end, -W / 2, W / 2, gphi)
+    cab_len = min(2200.0, (u_end - u_front) * 0.4)
+    cab = rect(u_front, u_front + cab_len, -W / 2 * 0.96, W / 2 * 0.96, phi)
 
+    # --- Hjul (roterade för styrbara axlar) ---
+    wl, ww = 900.0, 360.0
+    yw = W / 2 * 0.82
+    wheels: List[List[Point]] = []
+    axle_angles: List[dict] = []
+    for a in axles:
+        ang = math.atan2(u_c - a.offset, R) if a.steered else 0.0
+        axle_angles.append({"offset": a.offset, "steered": a.steered, "angle": round(math.degrees(ang), 1)})
+        ca, sa = math.cos(-ang), math.sin(-ang)   # rotera hjulet i kroppsplanet
+        for side in (yw, -yw):
+            local = [(-wl / 2, -ww / 2), (wl / 2, -ww / 2), (wl / 2, ww / 2), (-wl / 2, ww / 2)]
+            poly = []
+            for du, dy in local:
+                ru = du * ca - dy * sa
+                ry = du * sa + dy * ca
+                poly.append(T(a.offset + ru, side + ry, phi))
+            wheels.append(poly)
+
+    a0, a1 = math.radians(arc_span_deg[0]), math.radians(arc_span_deg[1])
     return TurningResult(
         steering_angle=steering_angle_deg,
-        r_rear=round(r_rear, 1),
+        r_rear=round(R, 1),
         r_front=round(r_front, 1),
         r_out=round(r_out, 1),
         r_in=round(r_in, 1),
@@ -117,23 +148,44 @@ def compute(
         center=(0.0, 0.0),
         arc_in=_arc(r_in, a0, a1),
         arc_out=_arc(r_out, a0, a1),
-        body=body_at(phi),
+        body=body,
         cab=cab,
-        ghost=body_at(gphi),
-        axle_front=[_point(r_rear, phi, L, W / 2 * 0.86), _point(r_rear, phi, L, -W / 2 * 0.86)],
-        axle_rear=[_point(r_rear, phi, 0, W / 2 * 0.86), _point(r_rear, phi, 0, -W / 2 * 0.86)],
+        ghost=ghost,
+        wheels=wheels,
+        axle_angles=axle_angles,
     )
 
 
-def dims_from_vehicle(v, defaults=None) -> Optional[TruckDims]:
-    """Bygger TruckDims från ett Vehicle-objekt. Returnerar None om
-    hjulbas eller bredd saknas (då går ingen beräkning att göra)."""
-    L = v.wheelbase_mm
+def dims_from_vehicle(v) -> Optional[TruckDims]:
+    """Bygger TruckDims från ett Vehicle-objekt.
+
+    Använder i första hand ``v.axles`` (JSON-lista med ``{offset_mm, steered}``).
+    Faller tillbaka på ``wheelbase_mm`` (2-axlad, främre styrd) för äldre fordon.
+    Returnerar None om varken axelkonfiguration eller hjulbas + bredd finns.
+    """
     W = v.width_mm
-    if not L or not W:
+    if not W:
         return None
+
+    raw = getattr(v, "axles", None)
+    axles: List[Axle] = []
+    if raw:
+        for i, a in enumerate(raw):
+            off = a.get("offset_mm", a.get("offset"))
+            if off is None:
+                continue
+            steered = a.get("steered", i == 0)
+            axles.append(Axle(offset=float(off), steered=bool(steered)))
+    if len(axles) < 2 and v.wheelbase_mm:
+        axles = [Axle(0.0, True), Axle(float(v.wheelbase_mm), False)]
+    if len(axles) < 2:
+        return None
+    # Säkerställ att minst en axel är styrbar (främre)
+    if not any(a.steered for a in axles):
+        axles[0].steered = True
+
     return TruckDims(
-        wheelbase=float(L),
+        axles=axles,
         width=float(W),
         front_overhang=float(v.front_overhang_mm or 0),
         rear_overhang=float(v.rear_overhang_mm or 0),

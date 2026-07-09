@@ -211,107 +211,100 @@ export async function renderVehicleDetail(el, id) {
 
 function loadAxleLoad(v) {
   const el = document.getElementById('axleload-body');
+  const F = (id, label, ph = '') => `<div class="field"><label>${label}</label><input type="number" id="${id}" placeholder="${ph}"></div>`;
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:260px 1fr;gap:24px;align-items:start">
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start">
       <div>
-        <div class="field"><label>Hjulbas (mm)</label><input type="number" id="al-L" value="${v.wheelbase_mm || ''}"></div>
-        <div class="form-row">
-          <div class="field"><label>Tomvikt fram (kg)</label><input type="number" id="al-ef" placeholder="tomt chassi"></div>
-          <div class="field"><label>Tomvikt bak (kg)</label><input type="number" id="al-er" placeholder="tomt chassi"></div>
-        </div>
-        <div class="form-row">
-          <div class="field"><label>Tankvikt (kg)</label><input type="number" id="al-tw" placeholder="lastad tank"></div>
-          <div class="field"><label>Tanklängd (mm)</label><input type="number" id="al-tl" placeholder="t.ex. 6000"></div>
-        </div>
-        <div class="field">
-          <label>Läge</label>
-          <select id="al-mode">
-            <option value="place">Ange placering → få axeltryck</option>
-            <option value="target">Ange önskat bakaxeltryck → få placering</option>
-          </select>
-        </div>
-        <div class="field" id="al-place-field"><label>Tank framkant bakom framaxel (mm)</label><input type="number" id="al-tf" value="1000"></div>
-        <div class="field hidden" id="al-target-field"><label>Önskat axeltryck bak (kg)</label><input type="number" id="al-target"></div>
-        <button class="btn btn-ghost btn-sm" id="al-pdf-btn" style="margin-top:4px">
+        <div class="text-muted" style="font-size:12px;margin-bottom:6px">Max tillåtet axeltryck</div>
+        <div class="form-row">${F('al-mf', 'Max fram (kg)')}${F('al-mr', 'Max bak (kg)')}</div>
+
+        <div class="text-muted" style="font-size:12px;margin:10px 0 6px">Tomvikt (tomt chassi)</div>
+        <div class="form-row">${F('al-ef', 'Tomvikt fram (kg)')}${F('al-er', 'Tomvikt bak (kg)')}</div>
+        <div class="form-row">${F('al-et', 'Total tomvikt (kg)')}${F('al-tl', 'Tanklängd (mm)', 't.ex. 6000')}</div>
+
+        <div class="text-muted" style="font-size:12px;margin:10px 0 6px">Önskat / lastat</div>
+        <div class="form-row">${F('al-df', 'Önskat fram (kg)')}${F('al-dr', 'Önskat bak (kg)')}</div>
+        <div class="field"><label>Totalvikt lastad (kg)</label><input type="number" id="al-lt" placeholder="hela fordonet med tank"></div>
+
+        <div class="text-muted" style="font-size:11px;margin-bottom:8px">Hjulbas hämtas från fordonet (${v.wheelbase_mm ? v.wheelbase_mm + ' mm' : 'ej ifylld – fyll i under Redigera'}).</div>
+        <button class="btn btn-ghost btn-sm" id="al-pdf-btn">
           <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
           Ladda ner PDF (liggande)
         </button>
       </div>
-      <div id="al-result"><div class="text-muted" style="font-size:13px">Fyll i värdena så beräknas axeltrycken.</div></div>
+      <div id="al-result"><div class="text-muted" style="font-size:13px">Fyll i värdena så beräknas axeltrycken och tankens placering.</div></div>
     </div>`;
 
-  const ids = ['al-L', 'al-ef', 'al-er', 'al-tw', 'al-tl', 'al-tf', 'al-target'];
-  const modeSel = document.getElementById('al-mode');
+  const fields = {
+    max_front: 'al-mf', max_rear: 'al-mr', empty_front: 'al-ef', empty_rear: 'al-er',
+    empty_total: 'al-et', tank_length: 'al-tl', desired_front: 'al-df', desired_rear: 'al-dr',
+    loaded_total: 'al-lt',
+  };
 
   function params() {
-    const num = id => { const x = parseFloat(document.getElementById(id).value); return isNaN(x) ? null : x; };
-    const mode = modeSel.value;
-    const p = {
-      wheelbase: num('al-L'), empty_front: num('al-ef'), empty_rear: num('al-er'),
-      tank_weight: num('al-tw'), tank_length: num('al-tl'),
-    };
-    if (mode === 'target') p.target_rear = num('al-target');
-    else p.tank_front = num('al-tf');
+    const p = {};
+    for (const [k, id] of Object.entries(fields)) {
+      const x = parseFloat(document.getElementById(id).value);
+      p[k] = isNaN(x) ? null : x;
+    }
     return p;
   }
-
-  function query(p) {
-    return Object.entries(p).filter(([, x]) => x !== null && x !== undefined)
-      .map(([k, x]) => `${k}=${encodeURIComponent(x)}`).join('&');
-  }
+  const query = p => Object.entries(p).filter(([, x]) => x !== null)
+    .map(([k, x]) => `${k}=${encodeURIComponent(x)}`).join('&');
 
   async function recompute() {
     const p = params();
-    const need = [p.empty_front, p.empty_rear, p.tank_weight, p.tank_length, p.wheelbase];
-    if (need.some(x => x === null)) return;
-    if (modeSel.value === 'target' && p.target_rear === null) return;
-    if (modeSel.value === 'place' && p.tank_front === null) return;
+    if (Object.values(p).some(x => x === null)) return;
     const box = document.getElementById('al-result');
     let r;
     try { r = await api.get(`/vehicles/${v.id}/axle-load?${query(p)}`); }
     catch (err) { box.innerHTML = `<div class="alert alert-warning" style="margin:0">${err.message}</div>`; return; }
-    // Om målläge: spegla tillbaka beräknad framkant till fältet
-    if (modeSel.value === 'target') document.getElementById('al-tf').value = Math.round(r.tank_front);
+    const kg = x => Math.round(x).toLocaleString('sv-SE') + ' kg';
+    const util = (u) => `<span style="color:${u > 100 ? '#e5484d' : '#12a150'};font-weight:700">${u}%</span>`;
     box.innerHTML = `
-      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px">
-        ${turnStat('Axeltryck fram', r.front_load, 'var(--accent)', ' kg')}
-        ${turnStat('Axeltryck bak', r.rear_load, '#e5484d', ' kg')}
-        ${turnStat('Totalvikt', r.total, null, ' kg')}
-        ${turnStat('Tyngdpunkt (a)', r.cg, null, ' mm')}
+      <div class="table-wrap" style="margin-bottom:16px">
+        <table>
+          <thead><tr><th></th><th class="text-right">Fram</th><th class="text-right">Bak</th><th class="text-right">Totalt</th></tr></thead>
+          <tbody>
+            <tr><td>Tomvikt</td><td class="text-right">${kg(r.empty_front)}</td><td class="text-right">${kg(r.empty_rear)}</td><td class="text-right">${kg(r.empty_total)}</td></tr>
+            <tr><td><strong>Lastad</strong></td><td class="text-right"><strong>${kg(r.load_front)}</strong></td><td class="text-right"><strong>${kg(r.load_rear)}</strong></td><td class="text-right"><strong>${kg(r.loaded_total)}</strong></td></tr>
+            <tr><td>Max tillåten</td><td class="text-right">${kg(r.max_front)}</td><td class="text-right">${kg(r.max_rear)}</td><td class="text-right">${kg(r.max_total)}</td></tr>
+            <tr><td>Utnyttjande</td><td class="text-right">${util(r.front_util)}</td><td class="text-right">${util(r.rear_util)}</td><td class="text-right">${util(r.total_util)}</td></tr>
+          </tbody>
+        </table>
       </div>
-      <div class="text-muted" style="font-size:12px;margin-bottom:8px">Fördelning: fram ${r.front_pct}% · bak ${r.rear_pct}% · tank framkant ${Math.round(r.tank_front)} mm</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px">
+        ${turnStat('Tankvikt', r.tank_weight, null, ' kg')}
+        ${turnStat('Tyngdpunkt (a)', r.cg, 'var(--accent)', ' mm')}
+        ${turnStat('Tankens framkant', r.tank_front, null, ' mm')}
+      </div>
       ${r.warnings && r.warnings.length ? `<div class="alert alert-warning" style="margin:0 0 12px">${r.warnings.map(w => `⚠ ${w}`).join('<br>')}</div>` : ''}
       <div style="overflow-x:auto">${axleSvg(r)}</div>`;
   }
 
-  modeSel.addEventListener('change', () => {
-    const target = modeSel.value === 'target';
-    document.getElementById('al-place-field').classList.toggle('hidden', target);
-    document.getElementById('al-target-field').classList.toggle('hidden', !target);
-    recompute();
-  });
-  ids.forEach(id => document.getElementById(id).addEventListener('input', recompute));
-
+  Object.values(fields).forEach(id => document.getElementById(id).addEventListener('input', recompute));
   document.getElementById('al-pdf-btn').addEventListener('click', async () => {
     const p = params();
+    if (Object.values(p).some(x => x === null)) { showToast('Fyll i alla fält först', 'error'); return; }
     try { await downloadFile(`/vehicles/${v.id}/axle-load/pdf?${query(p)}`, `axeltryck-${v.license_plate}.pdf`); }
     catch (err) { showToast(err.message, 'error'); }
   });
 }
 
 function axleSvg(r) {
-  // Sidvy: framaxel x=0, bakaxel x=L. Enkel skalning till fast viewBox.
-  const W = 640, H = 300;
+  // Sidvy: framaxel x=0, bakre referens = sista axeln. Verkliga axelpositioner ritas.
+  const W = 660, H = 300;
   const rW = 520, beamBot = rW + 120, beamTop = rW + 300;
-  const tankBot = beamTop + 40, tankH = 2000, tankTop = tankBot + tankH;
-  const L = r.wheelbase;
-  const x0 = Math.min(0, r.tank_front) - 900, x1 = Math.max(L, r.tank_front + r.tank_length) + 900;
-  const y0 = -700, y1 = tankTop + 700;
+  const tankBot = beamTop + 40, tankTop = tankBot + 2000;
+  const axles = (r.axle_offsets && r.axle_offsets.length >= 2) ? r.axle_offsets : [0, r.wheelbase];
+  const rearRef = r.wheelbase;   // bakaxelgruppens centrum = lastreferens
+  const x0 = Math.min(0, r.tank_front, ...axles) - 1100, x1 = Math.max(rearRef, r.tank_front + r.tank_length, ...axles) + 1100;
+  const y0 = -700, y1 = tankTop + 750;
   const s = Math.min((W - 20) / (x1 - x0), (H - 20) / (y1 - y0));
   const ox = (W - (x1 - x0) * s) / 2, oy = (H - (y1 - y0) * s) / 2;
   const T = (x, y) => [ox + (x - x0) * s, H - (oy + (y - y0) * s)];
-  const [gx0] = T(x0, 0), gy = T(x0, 0)[1];
-  const [bx0, by0] = T(-rW, beamTop), [bx1] = T(L + rW, beamBot);
+  const gy = T(x0, 0)[1];
+  const [bx0, by0] = T(Math.min(...axles) - rW, beamTop), [bx1] = T(Math.max(...axles) + rW, beamBot);
   const [tx0, ty0] = T(r.tank_front, tankTop), [tx1, ty1] = T(r.tank_front + r.tank_length, tankBot);
   const wheel = ax => { const [cx, cy] = T(ax, rW); return `<circle cx="${cx}" cy="${cy}" r="${rW * s}" fill="#374151"/><circle cx="${cx}" cy="${cy}" r="${rW * s * 0.42}" fill="#9aa6b2"/>`; };
   const cgTop = T(r.cg, tankTop + 500), cgBot = T(r.cg, beamTop);
@@ -322,12 +315,12 @@ function axleSvg(r) {
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" font-family="inherit">
       <line x1="${T(x0, 0)[0]}" y1="${gy}" x2="${T(x1, 0)[0]}" y2="${gy}" stroke="#c3ccd6" stroke-width="1"/>
       <rect x="${bx0}" y="${by0}" width="${bx1 - bx0}" height="${T(0, beamBot)[1] - by0}" fill="#94a3b8"/>
-      ${wheel(0)} ${wheel(L)}
+      ${axles.map(wheel).join('')}
       <rect x="${tx0}" y="${ty0}" width="${tx1 - tx0}" height="${ty1 - ty0}" rx="10" fill="var(--accent)" fill-opacity="0.18" stroke="var(--accent)" stroke-width="1.6"/>
       <line x1="${cgBot[0]}" y1="${cgBot[1]}" x2="${cgTop[0]}" y2="${cgTop[1]}" stroke="#e5484d" stroke-width="1.4" stroke-dasharray="4 3"/>
       <circle cx="${cgTop[0]}" cy="${cgTop[1]}" r="4" fill="#e5484d"/>
       <text x="${cgTop[0]}" y="${cgTop[1] - 6}" text-anchor="middle" font-size="9" font-weight="700" fill="#e5484d">TP</text>
-      ${axleLabel(0, 'Framaxel', r.front_load)} ${axleLabel(L, 'Bakaxel', r.rear_load)}
+      ${axleLabel(0, 'Framaxel', r.load_front)} ${axleLabel(rearRef, 'Bakaxel', r.load_rear)}
     </svg>`;
 }
 

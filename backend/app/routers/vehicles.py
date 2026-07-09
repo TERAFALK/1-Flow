@@ -261,19 +261,34 @@ def turning_pdf(
 
 # ── Axeltryck / tankplacering ─────────────────────────────────────────────────
 
-def _axle_load(vehicle, wheelbase, empty_front, empty_rear, tank_weight,
-               tank_length, tank_front, target_rear):
-    L = wheelbase or (vehicle.wheelbase_mm if vehicle else None)
+def _load_geometry(vehicle, wheelbase_override):
+    """Härleder lasthjulbasen (framaxel → bakaxelgruppens centrum) och de verkliga
+    axeloffseten (normaliserade så framaxeln = 0) för sidvys-ritningen."""
+    raw = getattr(vehicle, "axles", None)
+    offs = []
+    if raw:
+        offs = sorted(float(a.get("offset_mm", a.get("offset", 0))) for a in raw)
+        offs = [o - offs[0] for o in offs]      # normalisera framaxel till 0
+    if wheelbase_override:
+        L = float(wheelbase_override)
+    elif len(offs) >= 2:
+        rear = offs[1:]                          # bakaxelgrupp
+        L = sum(rear) / len(rear)                # boggi-centrum bakom framaxeln
+    elif vehicle.wheelbase_mm:
+        L = float(vehicle.wheelbase_mm)
+    else:
+        L = None
+    if len(offs) < 2:
+        offs = [0.0, L] if L else []
+    return L, offs
+
+
+def _axle_load(vehicle, wheelbase, **kw):
+    L, _offs = _load_geometry(vehicle, wheelbase)
     if not L:
-        raise HTTPException(400, "Hjulbas krävs (ange den eller fyll i fordonets hjulbas)")
+        raise HTTPException(400, "Hjulbas krävs – fyll i fordonets hjulbas/axlar eller ange den")
     try:
-        return axleload.compute(
-            wheelbase=float(L),
-            empty_front=float(empty_front), empty_rear=float(empty_rear),
-            tank_weight=float(tank_weight), tank_length=float(tank_length),
-            tank_front=None if tank_front is None else float(tank_front),
-            target_rear=None if target_rear is None else float(target_rear),
-        )
+        return axleload.compute(wheelbase=float(L), **kw)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -281,33 +296,48 @@ def _axle_load(vehicle, wheelbase, empty_front, empty_rear, tank_weight,
 @router.get("/{vehicle_id}/axle-load")
 def get_axle_load(
     vehicle_id: int,
-    empty_front: float = Query(...), empty_rear: float = Query(...),
-    tank_weight: float = Query(...), tank_length: float = Query(...),
-    tank_front: Optional[float] = Query(None),
-    target_rear: Optional[float] = Query(None),
+    empty_front: float = Query(...), empty_rear: float = Query(...), empty_total: float = Query(...),
+    tank_length: float = Query(...), loaded_total: float = Query(...),
+    desired_front: float = Query(...), desired_rear: float = Query(...),
+    max_front: float = Query(...), max_rear: float = Query(...),
     wheelbase: Optional[float] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ):
     vehicle = _load_vehicle(db, vehicle_id)
-    return _axle_load(vehicle, wheelbase, empty_front, empty_rear,
-                      tank_weight, tank_length, tank_front, target_rear).to_dict()
+    L, offs = _load_geometry(vehicle, wheelbase)
+    r = _axle_load(
+        vehicle, wheelbase,
+        empty_front=empty_front, empty_rear=empty_rear, empty_total=empty_total,
+        tank_length=tank_length, loaded_total=loaded_total,
+        desired_front=desired_front, desired_rear=desired_rear,
+        max_front=max_front, max_rear=max_rear,
+    )
+    out = r.to_dict()
+    out["axle_offsets"] = offs
+    return out
 
 
 @router.get("/{vehicle_id}/axle-load/pdf")
 def axle_load_pdf(
     vehicle_id: int,
-    empty_front: float = Query(...), empty_rear: float = Query(...),
-    tank_weight: float = Query(...), tank_length: float = Query(...),
-    tank_front: Optional[float] = Query(None),
-    target_rear: Optional[float] = Query(None),
+    empty_front: float = Query(...), empty_rear: float = Query(...), empty_total: float = Query(...),
+    tank_length: float = Query(...), loaded_total: float = Query(...),
+    desired_front: float = Query(...), desired_rear: float = Query(...),
+    max_front: float = Query(...), max_rear: float = Query(...),
     wheelbase: Optional[float] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ):
     vehicle = _load_vehicle(db, vehicle_id)
-    r = _axle_load(vehicle, wheelbase, empty_front, empty_rear,
-                   tank_weight, tank_length, tank_front, target_rear)
+    L, offs = _load_geometry(vehicle, wheelbase)
+    r = _axle_load(
+        vehicle, wheelbase,
+        empty_front=empty_front, empty_rear=empty_rear, empty_total=empty_total,
+        tank_length=tank_length, loaded_total=loaded_total,
+        desired_front=desired_front, desired_rear=desired_rear,
+        max_front=max_front, max_rear=max_rear,
+    )
 
     buf = io.BytesIO()
     page_w, page_h = landscape(A4)
@@ -316,18 +346,26 @@ def axle_load_pdf(
     veh_label = f"{vehicle.license_plate} · {vehicle.make or ''} {vehicle.model or ''}".strip(" ·")
     top = draw_header(c, page_w, "Axeltryck – tankplacering", veh_label, top_y=page_h - 10 * mm)
 
-    # ── Sidvy (höger) ──
     L = r.wheelbase
-    rW = 520.0                       # visuell hjulradie (mm)
-    beam_bot, beam_top = rW + 120, rW + 300
-    tankH = 2000.0
-    tank_bot, tank_top = beam_top + 40, beam_top + 40 + tankH
-    x0 = min(0.0, r.tank_front) - 900
-    x1 = max(L, r.tank_front + r.tank_length) + 900
-    y0, y1 = -700.0, tank_top + 700
+    rear_ref = L   # bakaxelgruppens centrum = lastreferens (måtten pekar hit)
 
-    plot_left, plot_right = margin + 80 * mm, page_w - margin
-    plot_top, plot_bottom = top - 4 * mm, margin
+    def kg(v):
+        return f"{v:,.0f} kg".replace(",", " ")
+
+    def mm_(v):
+        return f"{v:,.0f} mm".replace(",", " ")
+
+    # ── Sidvy (höger) ──
+    rW = 520.0
+    beam_bot, beam_top = rW + 120, rW + 300
+    tank_bot, tank_top = beam_top + 40, beam_top + 40 + 2000.0
+    x_axles = offs if offs else [0.0, L]
+    x0 = min(0.0, r.tank_front, min(x_axles)) - 1100
+    x1 = max(rear_ref, r.tank_front + r.tank_length, max(x_axles)) + 1100
+    y0, y1 = -700.0, tank_top + 750
+
+    plot_left, plot_right = margin + 92 * mm, page_w - margin
+    plot_top, plot_bottom = top - 4 * mm, margin + 6 * mm
     scale = min((plot_right - plot_left) / (x1 - x0), (plot_top - plot_bottom) / (y1 - y0)) * 0.95
     ox = plot_left + ((plot_right - plot_left) - (x1 - x0) * scale) / 2
     oy = plot_bottom + ((plot_top - plot_bottom) - (y1 - y0) * scale) / 2
@@ -335,39 +373,31 @@ def axle_load_pdf(
     def T(x, y):
         return (ox + (x - x0) * scale, oy + (y - y0) * scale)
 
-    # Mark / underlag
+    # underlag
     c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.8)
     c.line(*T(x0, 0), *T(x1, 0))
-
-    # Chassiram
+    # chassiram
     c.setFillColor(colors.HexColor("#94a3b8"))
-    (bx0, by0), (bx1, by1) = T(-rW, beam_bot), T(L + rW, beam_top)
+    (bx0, by0), (bx1, by1) = T(min(x_axles) - rW, beam_bot), T(max(x_axles) + rW, beam_top)
     c.rect(bx0, by0, bx1 - bx0, by1 - by0, fill=1, stroke=0)
-
-    # Tank (cylinder i sidvy)
+    # tank
     c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.18)
     c.setStrokeColor(colors.HexColor("#2f6fed")); c.setLineWidth(1.6)
     (tx0, ty0), (tx1, ty1) = T(r.tank_front, tank_bot), T(r.tank_front + r.tank_length, tank_top)
     c.roundRect(tx0, ty0, tx1 - tx0, ty1 - ty0, min(40, (ty1 - ty0) / 2), fill=1, stroke=1)
     c.setFillAlpha(1)
-
-    # Hjul
-    c.setFillColor(colors.HexColor("#374151"))
-    for ax in (0.0, L):
+    # hjul vid varje verklig axel
+    for ax in x_axles:
         cx, cy = T(ax, rW)
-        c.circle(cx, cy, rW * scale, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor("#374151")); c.circle(cx, cy, rW * scale, fill=1, stroke=0)
         c.setFillColor(colors.HexColor("#9aa6b2")); c.circle(cx, cy, rW * scale * 0.42, fill=1, stroke=0)
-        c.setFillColor(colors.HexColor("#374151"))
-
-    # Tyngdpunkt (CG)
+    # tyngdpunkt
     c.setStrokeColor(colors.HexColor("#e5484d")); c.setLineWidth(1.4); c.setDash(4, 3)
-    c.line(*T(r.cg, beam_top), *T(r.cg, tank_top + 500)); c.setDash()
-    cgx, cgy = T(r.cg, tank_top + 500)
-    c.setFillColor(colors.HexColor("#e5484d"))
-    c.circle(cgx, cgy, 4, fill=1, stroke=0)
+    c.line(*T(r.cg, beam_top), *T(r.cg, tank_top + 520)); c.setDash()
+    cgx, cgy = T(r.cg, tank_top + 520)
+    c.setFillColor(colors.HexColor("#e5484d")); c.circle(cgx, cgy, 4, fill=1, stroke=0)
     c.setFont("Helvetica-Bold", 8); c.drawCentredString(cgx, cgy + 8, "TP")
 
-    # Måttlinjer: hjulbas L (under) och placering a (över)
     def dim(xa, xb, yl, label):
         ya = T(xa, yl)[1]
         c.setStrokeColor(colors.HexColor("#5a6675")); c.setLineWidth(0.7)
@@ -377,62 +407,73 @@ def axle_load_pdf(
         c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor("#5a6675"))
         c.drawCentredString((T(xa, yl)[0] + T(xb, yl)[0]) / 2, ya + 3, label)
 
-    dim(0, L, -480, f"Hjulbas {L:,.0f} mm".replace(",", " "))
-    dim(0, r.cg, tank_top + 640, f"a = {r.cg:,.0f} mm".replace(",", " "))
+    dim(0, rear_ref, -480, "Hjulbas " + mm_(rear_ref))
+    dim(0, r.cg, tank_top + 660, "a = " + mm_(r.cg))
 
-    # Axelbeteckningar med last under respektive hjul
-    for ax, name, load in ((0.0, "Framaxel", r.front_load), (L, "Bakaxel", r.rear_load)):
-        lx = T(ax, 0)[0]
-        c.setFont("Helvetica-Bold", 8.5); c.setFillColor(colors.black)
-        c.drawCentredString(lx, T(ax, -150)[1], name)
-        c.setFont("Helvetica", 8); c.setFillColor(colors.HexColor("#e5484d"))
-        c.drawCentredString(lx, T(ax, -300)[1], f"{load:,.0f} kg".replace(",", " "))
-    c.setFillColor(colors.black)
+    # axeletiketter
+    c.setFillColor(colors.black); c.setFont("Helvetica-Bold", 8.5)
+    c.drawCentredString(T(0, -150)[0], T(0, -150)[1], "Framaxel")
+    c.drawCentredString(T(rear_ref, -150)[0], T(rear_ref, -150)[1], "Bakaxel")
 
-    # ── Infopanel (vänster) ──
-    px, pw = margin, 72 * mm
-    py_top = top - 6 * mm
+    # ── Vikttabell (vänster) ──
+    px = margin
+    tw = 86 * mm
+    col = [px + 30 * mm, px + 52 * mm, px + 74 * mm]   # Fram, Bak, Total kolumn-högerkant
+    yy = top - 8 * mm
+    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
+    c.drawString(px, yy, "Viktfördelning")
+    yy -= 6
+    c.setStrokeColor(colors.HexColor("#E2001A")); c.setLineWidth(1)
+    c.line(px, yy, px + tw, yy); yy -= 14
 
-    def kg(v):
-        return f"{v:,.0f} kg".replace(",", " ")
+    # rubrikrad
+    c.setFont("Helvetica-Bold", 8.5); c.setFillColor(colors.HexColor("#5a6675"))
+    c.drawRightString(col[0], yy, "Fram")
+    c.drawRightString(col[1], yy, "Bak")
+    c.drawRightString(col[2], yy, "Totalt")
+    yy -= 4
+    c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.6); c.line(px, yy, px + tw, yy); yy -= 12
 
-    rows = [
-        ("Hjulbas", f"{L:,.0f} mm".replace(",", " ")),
-        ("Tomvikt fram", kg(r.empty_front)),
-        ("Tomvikt bak", kg(r.empty_rear)),
+    def trow(label, f, b, t, bold=False, color=colors.black):
+        nonlocal yy
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", 8.5)
+        c.setFillColor(colors.HexColor("#333333")); c.drawString(px, yy, label)
+        c.setFillColor(color)
+        c.drawRightString(col[0], yy, kg(f))
+        c.drawRightString(col[1], yy, kg(b))
+        c.drawRightString(col[2], yy, kg(t))
+        yy -= 13
+
+    trow("Tomvikt", r.empty_front, r.empty_rear, r.empty_total)
+    trow("Lastad", r.load_front, r.load_rear, r.loaded_total, bold=True)
+    trow("Max tillåten", r.max_front, r.max_rear, r.max_total)
+    # utnyttjande
+    c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.6); c.line(px, yy + 4, px + tw, yy + 4)
+    over = colors.HexColor("#e5484d")
+    c.setFont("Helvetica-Bold", 8.5); c.setFillColor(colors.HexColor("#333333"))
+    c.drawString(px, yy, "Utnyttjande")
+    c.setFillColor(over if r.front_util > 100 else colors.HexColor("#12a150")); c.drawRightString(col[0], yy, f"{r.front_util:g}%")
+    c.setFillColor(over if r.rear_util > 100 else colors.HexColor("#12a150")); c.drawRightString(col[1], yy, f"{r.rear_util:g}%")
+    c.setFillColor(over if r.total_util > 100 else colors.HexColor("#12a150")); c.drawRightString(col[2], yy, f"{r.total_util:g}%")
+    yy -= 20
+
+    # tankdata
+    c.setFillColor(colors.black); c.setFont("Helvetica-Bold", 9.5); c.drawString(px, yy, "Tankplacering"); yy -= 14
+    for label, value in [
         ("Tankvikt", kg(r.tank_weight)),
-        ("Tanklängd", f"{r.tank_length:,.0f} mm".replace(",", " ")),
-        ("Tank framkant", f"{r.tank_front:,.0f} mm".replace(",", " ")),
-        ("Tyngdpunkt (a)", f"{r.cg:,.0f} mm".replace(",", " ")),
-        ("__sep__", ""),
-        ("Axeltryck FRAM", kg(r.front_load) + f"  ({r.front_pct:g}%)"),
-        ("Axeltryck BAK", kg(r.rear_load) + f"  ({r.rear_pct:g}%)"),
-        ("Totalvikt", kg(r.total)),
-    ]
-    ph = 16 + len(rows) * 15
-    c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.05)
-    c.roundRect(px, py_top - ph, pw, ph, 6, fill=1, stroke=0); c.setFillAlpha(1)
-    c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.8)
-    c.roundRect(px, py_top - ph, pw, ph, 6, fill=0, stroke=1)
-    yy = py_top - 15
-    for label, value in rows:
-        if label == "__sep__":
-            c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.6)
-            c.line(px + 8, yy + 4, px + pw - 8, yy + 4); yy -= 15; continue
-        bold = label.startswith("Axeltryck") or label == "Totalvikt"
-        c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#5a6675"))
-        c.drawString(px + 8, yy, label)
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", 9)
-        c.setFillColor(colors.HexColor("#e5484d") if bold else colors.black)
-        c.drawRightString(px + pw - 8, yy, value)
-        yy -= 15
+        ("Tanklängd", mm_(r.tank_length)),
+        ("Tyngdpunkt (a) bakom framaxel", mm_(r.cg)),
+        ("Tankens framkant bakom framaxel", mm_(r.tank_front)),
+    ]:
+        c.setFont("Helvetica", 8.5); c.setFillColor(colors.HexColor("#5a6675")); c.drawString(px, yy, label)
+        c.setFont("Helvetica-Bold", 8.5); c.setFillColor(colors.black); c.drawRightString(px + tw, yy, value)
+        yy -= 13
 
-    # Varningar
     if r.warnings:
+        yy -= 4
         c.setFont("Helvetica-Oblique", 8); c.setFillColor(colors.HexColor("#e5484d"))
-        wy = py_top - ph - 10
         for w in r.warnings:
-            c.drawString(px, wy, "⚠ " + w); wy -= 11
+            c.drawString(px, yy, "⚠ " + w); yy -= 11
 
     c.save()
     buf.seek(0)

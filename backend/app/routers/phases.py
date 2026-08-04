@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import nulls_last
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -14,7 +15,14 @@ router = APIRouter(prefix="/api/work-orders", tags=["phases"])
 def list_phases(order_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     if not db.get(WorkOrder, order_id):
         raise HTTPException(404, "Arbetsorder ej hittad")
-    return db.query(WorkOrderPhase).filter(WorkOrderPhase.work_order_id == order_id).order_by(WorkOrderPhase.sort_order).all()
+    # sort_order är 0 för allt som skapas via formuläret – fall därför tillbaka på
+    # startdatum så att Gantt-schemat blir kronologiskt och stabilt sorterat
+    return (
+        db.query(WorkOrderPhase)
+        .filter(WorkOrderPhase.work_order_id == order_id)
+        .order_by(WorkOrderPhase.sort_order, nulls_last(WorkOrderPhase.start_date), WorkOrderPhase.id)
+        .all()
+    )
 
 
 @router.post("/{order_id}/phases", response_model=WorkOrderPhaseOut, status_code=201)

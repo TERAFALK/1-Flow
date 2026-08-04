@@ -223,6 +223,7 @@ class ArticleUpdate(BaseModel):
 class ArticleImportResult(BaseModel):
     imported: int
     seconds: float
+    relinked: int = 0
 
 
 class ArticleOut(BaseModel):
@@ -245,6 +246,7 @@ class ArticleOut(BaseModel):
 
 class WorkOrderLineCreate(BaseModel):
     article_id: Optional[int] = None
+    article_number: Optional[str] = None
     description: str
     quantity: Decimal = Decimal("1")
     unit: str = "st"
@@ -257,6 +259,7 @@ class WorkOrderLineBulkCreate(BaseModel):
 
 class WorkOrderLineUpdate(BaseModel):
     description: Optional[str] = None
+    article_number: Optional[str] = None
     quantity: Optional[Decimal] = None
     unit: Optional[str] = None
     unit_price: Optional[Decimal] = None
@@ -267,6 +270,7 @@ class WorkOrderLineOut(BaseModel):
     id: int
     work_order_id: int
     article_id: Optional[int]
+    article_number: Optional[str] = None
     description: str
     quantity: Decimal
     unit: str
@@ -584,6 +588,7 @@ class DashboardStats(BaseModel):
 
 class PickListLineCreate(BaseModel):
     article_id: Optional[int] = None
+    article_number: Optional[str] = None
     description: str
     quantity: Decimal = Decimal("1")
     unit: str = "st"
@@ -616,7 +621,9 @@ class PickListLineOut(BaseModel):
             unit=line.unit,
             location=line.location,
             picked=line.picked,
-            article_number=line.article.article_number if line.article else None,
+            # Radens sparade art.nr vinner – det finns kvar även efter att
+            # artikelregistret rensats och lästs in på nytt
+            article_number=line.article_number or (line.article.article_number if line.article else None),
         )
 
 

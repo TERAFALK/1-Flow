@@ -306,7 +306,7 @@ export async function renderScanner(el) {
           ${lines.map(l => `
             <tr>
               <td><strong>${l.description}</strong>
-                ${(l.article?.article_number || l.article_number) ? `<br><small class="font-mono text-muted">${l.article?.article_number || l.article_number}</small>` : ''}
+                ${(l.article_number || l.article?.article_number) ? `<br><small class="font-mono text-muted">${l.article_number || l.article?.article_number}</small>` : ''}
               </td>
               <td class="text-right">${l.quantity} ${l.unit}</td>
             </tr>

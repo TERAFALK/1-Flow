@@ -143,6 +143,18 @@ def _run_migrations():
             location VARCHAR,
             picked BOOLEAN DEFAULT FALSE
         )""",
+        # Artikelnummer på raderna – överlever tömning/ominläsning av artikelregistret
+        "ALTER TABLE work_order_lines ADD COLUMN IF NOT EXISTS article_number VARCHAR",
+        "ALTER TABLE pick_list_lines ADD COLUMN IF NOT EXISTS article_number VARCHAR",
+        "CREATE INDEX IF NOT EXISTS ix_work_order_lines_article_number ON work_order_lines (article_number)",
+        "CREATE INDEX IF NOT EXISTS ix_pick_list_lines_article_number ON pick_list_lines (article_number)",
+        # Backfill av befintliga rader som fortfarande har kvar sin artikelkoppling
+        """UPDATE work_order_lines l SET article_number = a.article_number
+           FROM articles a WHERE l.article_id = a.id AND l.article_number IS NULL""",
+        """UPDATE pick_list_lines l SET article_number = a.article_number
+           FROM articles a WHERE l.article_id = a.id AND l.article_number IS NULL""",
+        """UPDATE purchase_lines l SET article_number = a.article_number
+           FROM articles a WHERE l.article_id = a.id AND l.article_number IS NULL""",
     ]
     with engine.connect() as conn:
         for stmt in stmts:

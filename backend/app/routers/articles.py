@@ -3,11 +3,15 @@ import time
 from typing import List, Optional
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user
 from ..schemas import ArticleCreate, ArticleUpdate, ArticleOut, StockTransactionOut, ArticleImportResult
-from ..models import Article, StockTransaction, StockTransactionType, User, WorkOrderLine, PickListLine
+from ..models import (
+    Article, StockTransaction, StockTransactionType, User,
+    WorkOrderLine, PickListLine, PurchaseLine,
+)
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
 
@@ -32,23 +36,49 @@ def list_articles(
     return query.order_by(Article.name).offset(offset).limit(limit).all()
 
 
+_LINKED_TABLES = ("work_order_lines", "pick_list_lines", "purchase_lines")
+
+
 def _wipe_articles(db: Session):
     """Tömmer artikelregistret utan att förstöra befintliga rader.
 
     Alla rader som pekar på en artikel (delar/arbetsorder, inköpsrader, plockrader
-    och skanningar) behålls intakta – vi nollar bara deras article_id så att raderna
-    står kvar med sin benämning/art.nr. Detta måste ske för samtliga tabeller innan
-    artiklarna raderas, annars stoppar en FK-referens raderingen (HTTP 500).
+    och skanningar) behålls intakta. Innan article_id nollas kopieras artikelnumret
+    ner på raden, så att skannade artiklar och delar på en arbetsorder behåller sitt
+    art.nr även efter att registret rensats. Nollningen måste ske för samtliga
+    tabeller innan artiklarna raderas, annars stoppar en FK-referens raderingen.
     """
     raw_conn = db.connection().connection
     cur = raw_conn.cursor()
-    cur.execute("UPDATE work_order_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
-    cur.execute("UPDATE pick_list_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
-    cur.execute("UPDATE purchase_lines SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
+    for table in _LINKED_TABLES:
+        cur.execute(f"""
+            UPDATE {table} l SET article_number = a.article_number
+            FROM articles a
+            WHERE l.article_id = a.id
+              AND a.article_number IS NOT NULL
+              AND (l.article_number IS NULL OR l.article_number = '')
+        """)
+        cur.execute(f"UPDATE {table} SET article_id = NULL WHERE article_id IN (SELECT id FROM articles)")
     cur.execute("DELETE FROM stock_transactions")
     cur.execute("DELETE FROM articles")
     raw_conn.commit()
     cur.close()
+
+
+def _relink_articles(cur):
+    """Kopplar om rader utan article_id till nyinlästa artiklar via art.nr."""
+    relinked = 0
+    for table in _LINKED_TABLES:
+        cur.execute(f"""
+            UPDATE {table} l SET article_id = a.id
+            FROM articles a
+            WHERE l.article_id IS NULL
+              AND l.article_number IS NOT NULL
+              AND l.article_number <> ''
+              AND upper(a.article_number) = upper(l.article_number)
+        """)
+        relinked += cur.rowcount or 0
+    return relinked
 
 
 @router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
@@ -116,10 +146,16 @@ async def import_excel(
         SELECT NULLIF(article_number, ''), name, NULLIF(supplier, ''), NULLIF(location, ''), 'st', 0, 0, 0, NOW()
         FROM _articles_stage
     """)
+    # Rader som tappade sin koppling vid rensningen hittar tillbaka via art.nr
+    relinked = _relink_articles(cur)
     raw_conn.commit()
     cur.close()
 
-    return ArticleImportResult(imported=len(rows_out), seconds=round(time.time() - t0, 1))
+    return ArticleImportResult(
+        imported=len(rows_out),
+        seconds=round(time.time() - t0, 1),
+        relinked=relinked,
+    )
 
 
 @router.post("", response_model=ArticleOut, status_code=status.HTTP_201_CREATED)
@@ -130,6 +166,14 @@ def create_article(
 ):
     article = Article(**body.model_dump())
     db.add(article)
+    db.flush()
+    # Rader som väntar på just detta art.nr (t.ex. efter en rensning) kopplas ihop igen
+    if article.article_number:
+        for model in (WorkOrderLine, PickListLine, PurchaseLine):
+            db.query(model).filter(
+                model.article_id.is_(None),
+                func.upper(model.article_number) == article.article_number.upper(),
+            ).update({model.article_id: article.id}, synchronize_session=False)
     db.commit()
     db.refresh(article)
     return article
@@ -174,14 +218,18 @@ def delete_article(
     if not article:
         raise HTTPException(status_code=404, detail="Artikel ej hittad")
     # article_id är NOT NULL på stock_transactions och refereras från order-/plockrader
-    # utan cascade – städa referenserna innan artikeln tas bort
+    # utan cascade – städa referenserna innan artikeln tas bort. Art.nr snapshottas
+    # på raderna så att de behåller sin identitet.
     db.query(StockTransaction).filter(StockTransaction.article_id == article_id).delete(synchronize_session=False)
-    db.query(WorkOrderLine).filter(WorkOrderLine.article_id == article_id).update(
-        {WorkOrderLine.article_id: None}, synchronize_session=False
-    )
-    db.query(PickListLine).filter(PickListLine.article_id == article_id).update(
-        {PickListLine.article_id: None}, synchronize_session=False
-    )
+    for model in (WorkOrderLine, PickListLine, PurchaseLine):
+        if article.article_number:
+            db.query(model).filter(
+                model.article_id == article_id,
+                (model.article_number.is_(None)) | (model.article_number == ""),
+            ).update({model.article_number: article.article_number}, synchronize_session=False)
+        db.query(model).filter(model.article_id == article_id).update(
+            {model.article_id: None}, synchronize_session=False
+        )
     db.delete(article)
     db.commit()
 

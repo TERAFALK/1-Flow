@@ -45,6 +45,24 @@ export async function uploadFile(url, formData) {
   return data;
 }
 
+/** Hämtar en PDF och öppnar den i en ny flik med utskriftsdialogen. */
+export async function printFile(url) {
+  const token = localStorage.getItem('flow_token');
+  const res = await fetch(`${BASE}${url}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const objUrl = URL.createObjectURL(await res.blob());
+  const win = window.open(objUrl, '_blank');
+  if (!win) {
+    URL.revokeObjectURL(objUrl);
+    throw new Error('Popup blockerad – tillåt popup-fönster för att skriva ut');
+  }
+  // PDF-visaren har egen utskriftsknapp om load-eventet inte hinner triggas
+  win.addEventListener('load', () => { try { win.print(); } catch {} }, { once: true });
+  setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
+}
+
 export async function downloadFile(url, filename) {
   const token = localStorage.getItem('flow_token');
   const res = await fetch(`${BASE}${url}`, {

@@ -28,6 +28,15 @@ def _out(pl: PickList) -> PickListOut:
     )
 
 
+def _with_article_number(db: Session, data: dict) -> dict:
+    """Snapshotar art.nr på plockraden så det överlever en ominläsning av artikelregistret."""
+    if not data.get("article_number") and data.get("article_id"):
+        article = db.get(Article, data["article_id"])
+        if article:
+            data["article_number"] = article.article_number
+    return data
+
+
 def _get(db: Session, pick_list_id: int) -> PickList:
     pl = (
         db.query(PickList)
@@ -55,7 +64,7 @@ def create_pick_list(body: PickListCreate, db: Session = Depends(get_db), curren
     db.add(pl)
     db.flush()
     for line in body.lines:
-        db.add(PickListLine(pick_list_id=pl.id, **line.model_dump()))
+        db.add(PickListLine(pick_list_id=pl.id, **_with_article_number(db, line.model_dump())))
     db.commit()
     return _out(_get(db, pl.id))
 
@@ -87,7 +96,7 @@ def delete_pick_list(pick_list_id: int, db: Session = Depends(get_db), _: User =
 def add_line(pick_list_id: int, body: PickListLineCreate, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     if not db.get(PickList, pick_list_id):
         raise HTTPException(status_code=404, detail="Plocklista ej hittad")
-    line = PickListLine(pick_list_id=pick_list_id, **body.model_dump())
+    line = PickListLine(pick_list_id=pick_list_id, **_with_article_number(db, body.model_dump()))
     db.add(line)
     db.commit()
     db.refresh(line)
@@ -137,10 +146,13 @@ def scan_into_pick_list(
         ).first()
         if line:
             line.quantity = line.quantity + Decimal("1")
+            if not line.article_number:
+                line.article_number = article.article_number
         else:
             line = PickListLine(
                 pick_list_id=pick_list_id,
                 article_id=article.id,
+                article_number=article.article_number,
                 description=article.name,
                 quantity=Decimal("1"),
                 unit=article.unit,
@@ -164,6 +176,8 @@ def scan_into_pick_list(
             line = PickListLine(
                 pick_list_id=pick_list_id,
                 article_id=None,
+                # Skannad kod sparas som art.nr så raden hittar tillbaka vid import
+                article_number=barcode,
                 description=desc,
                 quantity=Decimal("1"),
                 unit="st",
@@ -231,7 +245,7 @@ def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = De
             y = header_row(y)
             c.setFont("Helvetica", 8.5)
         c.rect(col_x["check"], y - 9, 9, 9, stroke=1, fill=0)
-        art_nr = line.article.article_number if line.article else ""
+        art_nr = line.article_number or (line.article.article_number if line.article else "")
         c.drawString(col_x["art"], y - 8, (art_nr or "")[:12])
         c.drawString(col_x["desc"], y - 8, (line.description or "")[:34])
         c.drawString(col_x["loc"], y - 8, (line.location or "")[:8])

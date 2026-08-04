@@ -326,6 +326,9 @@ class WorkOrderLine(Base):
     id = Column(Integer, primary_key=True, index=True)
     work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
     article_id = Column(Integer, ForeignKey("articles.id"))
+    # Artikelnumret sparas på raden (inte bara via article_id) så att det överlever
+    # en tömning/ominläsning av artikelregistret – se articles._wipe_articles
+    article_number = Column(String, index=True)
     description = Column(String, nullable=False)
     quantity = Column(Numeric(10, 2), default=1, nullable=False)
     unit = Column(String, default="st")
@@ -394,6 +397,8 @@ class PickListLine(Base):
     id = Column(Integer, primary_key=True, index=True)
     pick_list_id = Column(Integer, ForeignKey("pick_lists.id"), nullable=False)
     article_id = Column(Integer, ForeignKey("articles.id"))
+    # Se WorkOrderLine.article_number – bevaras vid ominläsning av artikelregistret
+    article_number = Column(String, index=True)
     description = Column(String, nullable=False)
     quantity = Column(Numeric(10, 2), default=1, nullable=False)
     unit = Column(String, default="st")

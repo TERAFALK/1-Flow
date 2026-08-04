@@ -43,7 +43,7 @@ export async function renderArticles(el) {
   importInput.addEventListener('change', async () => {
     const file = importInput.files[0];
     if (!file) return;
-    const ok = await confirmDialog(`Detta skriver <strong>över hela artikellagret</strong> med innehållet i <strong>${file.name}</strong>. Alla befintliga artiklar tas bort och ersätts. Fortsätta?`, 'Importera');
+    const ok = await confirmDialog(`Detta skriver <strong>över hela artikellagret</strong> med innehållet i <strong>${file.name}</strong>. Alla befintliga artiklar tas bort och ersätts.<br><br>Artikelnummer på arbetsorder, plocklistor och inköp behålls och kopplas om automatiskt. Fortsätta?`, 'Importera');
     importInput.value = '';
     if (!ok) return;
     const btn = document.getElementById('import-excel-btn');
@@ -53,7 +53,11 @@ export async function renderArticles(el) {
       const fd = new FormData();
       fd.append('file', file);
       const result = await uploadFile('/articles/import-excel', fd);
-      showToast(`${result.imported} artiklar importerade på ${result.seconds}s`, 'success');
+      showToast(
+        `${result.imported} artiklar importerade på ${result.seconds}s` +
+        (result.relinked ? ` · ${result.relinked} rader återkopplade` : ''),
+        'success',
+      );
       reload();
     } catch (err) {
       showToast(err.message, 'error');
@@ -64,7 +68,7 @@ export async function renderArticles(el) {
   });
 
   document.getElementById('clear-stock-btn').addEventListener('click', async () => {
-    const ok = await confirmDialog('Detta tar bort <strong>alla artiklar</strong> i lagret permanent. Är du säker?');
+    const ok = await confirmDialog('Detta tar bort <strong>alla artiklar</strong> i lagret permanent. Rader på arbetsorder, plocklistor och inköp behåller sitt artikelnummer. Är du säker?');
     if (!ok) return;
     try {
       await api.delete('/articles/all');

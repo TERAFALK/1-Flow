@@ -2,6 +2,7 @@ import os
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
+from reportlab.lib.utils import simpleSplit
 from reportlab.pdfgen import canvas
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "logo.svg")
@@ -59,3 +60,35 @@ def draw_header(c: canvas.Canvas, page_width, title: str, subtitle: str = "", to
     c.setLineWidth(1.2)
     c.line(margin, top_y - 32, page_width - margin, top_y - 32)
     return top_y - 42
+
+
+def wrap_lines(text: str, font_name: str, font_size: float, max_width: float):
+    """Bryter text till rader som ryms inom ``max_width``.
+
+    Tomma rader i källtexten bevaras så att styckeindelningen i en arbetstext
+    följer med till PDF:en."""
+    out = []
+    for paragraph in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if not paragraph.strip():
+            out.append("")
+            continue
+        out.extend(simpleSplit(paragraph, font_name, font_size, max_width) or [""])
+    return out
+
+
+def draw_paragraph(c: canvas.Canvas, text: str, x, y, max_width, font_name="Helvetica",
+                   font_size=9.5, leading=13, min_y=25 * mm, on_new_page=None):
+    """Ritar brödtext med radbrytning och automatiska sidbrytningar.
+
+    ``on_new_page`` anropas efter varje sidbrytning och ska returnera nytt y-läge.
+    Returnerar y-positionen under sista raden."""
+    c.setFont(font_name, font_size)
+    for line in wrap_lines(text, font_name, font_size, max_width):
+        if y < min_y:
+            c.showPage()
+            y = on_new_page() if on_new_page else (287 * mm)
+            c.setFont(font_name, font_size)
+        if line:
+            c.drawString(x, y, line)
+        y -= leading
+    return y

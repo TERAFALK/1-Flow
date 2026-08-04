@@ -90,7 +90,7 @@ async function openPickListBuilder(onSaved, existingId = null) {
     existing.lines.forEach(l => {
       const key = l.article_id ? `a${l.article_id}` : `m${l.id}`;
       selected.set(key, {
-        article_id: l.article_id, description: l.description,
+        article_id: l.article_id, article_number: l.article_number, description: l.description,
         quantity: parseFloat(l.quantity), unit: l.unit, location: l.location,
       });
     });
@@ -117,7 +117,7 @@ async function openPickListBuilder(onSaved, existingId = null) {
           <label>Valda artiklar (<span id="pl-count">${selected.size}</span>)</label>
           <div class="table-wrap" style="max-height:280px;overflow-y:auto">
             <table>
-              <thead><tr><th>Artikel</th><th>Plats</th><th style="width:90px">Antal</th><th></th></tr></thead>
+              <thead><tr><th>Artikel</th><th>Art.nr</th><th>Plats</th><th style="width:90px">Antal</th><th></th></tr></thead>
               <tbody id="pl-selected-tbody"></tbody>
             </table>
           </div>
@@ -134,12 +134,13 @@ async function openPickListBuilder(onSaved, existingId = null) {
     const tbody = document.getElementById('pl-selected-tbody');
     document.getElementById('pl-count').textContent = selected.size;
     if (!selected.size) {
-      tbody.innerHTML = `<tr><td colspan="4" class="text-muted" style="text-align:center;padding:16px">Inga artiklar valda</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="text-muted" style="text-align:center;padding:16px">Inga artiklar valda</td></tr>`;
       return;
     }
     tbody.innerHTML = [...selected.entries()].map(([key, l]) => `
       <tr>
         <td><strong>${l.description}</strong></td>
+        <td class="font-mono text-muted">${l.article_number || '–'}</td>
         <td class="text-muted">${l.location || '–'}</td>
         <td><input type="number" min="0.01" step="0.01" value="${l.quantity}" data-qty="${key}" style="width:70px"></td>
         <td><button type="button" class="btn-icon" data-remove="${key}">✕</button></td>
@@ -181,7 +182,7 @@ async function openPickListBuilder(onSaved, existingId = null) {
           const key = `a${a.id}`;
           const cur = selected.get(key);
           if (cur) cur.quantity += 1;
-          else selected.set(key, { article_id: a.id, description: a.name, quantity: 1, unit: a.unit, location: a.location });
+          else selected.set(key, { article_id: a.id, article_number: a.article_number || null, description: a.name, quantity: 1, unit: a.unit, location: a.location });
           renderSelected();
           searchInput.value = '';
           resultsBox.innerHTML = '';
@@ -196,6 +197,7 @@ async function openPickListBuilder(onSaved, existingId = null) {
     const { title, notes } = Object.fromEntries(new FormData(e.target));
     const lines = [...selected.values()].map(l => ({
       article_id: l.article_id || null,
+      article_number: l.article_number || null,
       description: l.description,
       quantity: l.quantity,
       unit: l.unit || 'st',

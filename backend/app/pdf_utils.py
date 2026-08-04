@@ -3,6 +3,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.utils import simpleSplit
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "logo.svg")
@@ -74,6 +75,67 @@ def wrap_lines(text: str, font_name: str, font_size: float, max_width: float):
             continue
         out.extend(simpleSplit(paragraph, font_name, font_size, max_width) or [""])
     return out
+
+
+def truncate(text, font_name: str, font_size: float, max_width: float) -> str:
+    """Kortar text med avslutande ellips så att den ryms inom ``max_width``."""
+    text = str(text if text is not None else "")
+    if stringWidth(text, font_name, font_size) <= max_width:
+        return text
+    while text and stringWidth(text + "…", font_name, font_size) > max_width:
+        text = text[:-1]
+    return (text + "…") if text else ""
+
+
+def draw_info_panel(c: canvas.Canvas, x, y_top, width, title, rows,
+                    accent="#2f6fed", row_h=14, font_size=8.5):
+    """Ritar en rubricerad etikett/värde-panel och returnerar panelens underkant.
+
+    ``rows`` är (etikett, värde)-par; par med tomt värde hoppas över så att en
+    ofullständigt ifylld post inte ger tomma rader. Värden kortas för att aldrig
+    krocka med etiketten."""
+    rows = [(lbl, str(val)) for lbl, val in rows if val not in (None, "", "None")]
+    label_w = width * 0.42
+    value_w = width - label_w - 18
+    inner_w = width - 16
+
+    # Värden som inte ryms bredvid etiketten (kundnamn, chassinr …) läggs på egen
+    # rad i full bredd istället för att kapas
+    laid = [
+        (lbl, val, stringWidth(val, "Helvetica-Bold", font_size) > value_w)
+        for lbl, val in rows
+    ]
+    head_h = 16 if title else 6
+    height = head_h + sum(row_h * (2 if stacked else 1) for _, _, stacked in laid) + 8
+
+    c.setFillColor(colors.HexColor(accent))
+    c.setFillAlpha(0.05)
+    c.roundRect(x, y_top - height, width, height, 6, fill=1, stroke=0)
+    c.setFillAlpha(1)
+    c.setStrokeColor(colors.HexColor("#c3ccd6"))
+    c.setLineWidth(0.8)
+    c.roundRect(x, y_top - height, width, height, 6, fill=0, stroke=1)
+
+    y = y_top - 12
+    if title:
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColor(colors.HexColor(accent))
+        c.drawString(x + 8, y, title.upper())
+        y -= head_h - 2
+
+    for label, value, stacked in laid:
+        c.setFont("Helvetica", font_size)
+        c.setFillColor(colors.HexColor("#5a6675"))
+        c.drawString(x + 8, y, truncate(label, "Helvetica", font_size, label_w if not stacked else inner_w))
+        c.setFont("Helvetica-Bold", font_size)
+        c.setFillColor(colors.black)
+        if stacked:
+            y -= row_h
+            c.drawRightString(x + width - 8, y, truncate(value, "Helvetica-Bold", font_size, inner_w))
+        else:
+            c.drawRightString(x + width - 8, y, truncate(value, "Helvetica-Bold", font_size, value_w))
+        y -= row_h
+    return y_top - height
 
 
 def draw_paragraph(c: canvas.Canvas, text: str, x, y, max_width, font_name="Helvetica",

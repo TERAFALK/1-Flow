@@ -10,7 +10,7 @@ from reportlab.pdfgen import canvas
 from ..database import get_db
 from ..deps import get_current_user
 from ..schemas import VehicleCreate, VehicleUpdate, VehicleOut
-from ..pdf_utils import draw_header
+from ..pdf_utils import draw_header, draw_info_panel
 from .. import models
 from .. import turning
 from .. import axleload
@@ -134,6 +134,46 @@ def get_turning(
     return _turning_for(vehicle, angle).to_dict()
 
 
+def _mm(value) -> str:
+    """Millimetervärde med tusentalsavgränsare, t.ex. 12 450 mm."""
+    if value in (None, ""):
+        return ""
+    return f"{float(value):,.0f} mm".replace(",", " ")
+
+
+def _vehicle_label(vehicle: models.Vehicle) -> str:
+    """Underrubrik till utskrifter: reg.nr · fabrikat modell · kund."""
+    parts = [
+        vehicle.license_plate,
+        f"{vehicle.make or ''} {vehicle.model or ''}".strip(),
+        vehicle.customer.name if vehicle.customer else "",
+    ]
+    return " · ".join(p for p in parts if p)
+
+
+def _vehicle_rows(vehicle: models.Vehicle):
+    """Fordonsdata för infopanelen. Tomma fält filtreras bort av draw_info_panel."""
+    return [
+        ("Kund", vehicle.customer.name if vehicle.customer else ""),
+        ("Reg.nr", vehicle.license_plate),
+        ("Fabrikat", vehicle.make),
+        ("Modell", vehicle.model),
+        ("Årsmodell", vehicle.year),
+        ("Chassinr", vehicle.vin),
+        ("Motor", vehicle.engine),
+        ("Växellåda", vehicle.gearbox),
+        ("Mätarställning", f"{vehicle.odometer:,} km".replace(",", " ") if vehicle.odometer else ""),
+        ("Kraftuttag", vehicle.kraftuttag),
+        ("Utväxling", vehicle.utvaxling),
+        ("Rotation", vehicle.rotation),
+        ("Medbringare", vehicle.medbringare),
+        ("Hjulbas", _mm(vehicle.wheelbase_mm)),
+        ("Bredd", _mm(vehicle.width_mm)),
+        ("Överhäng fram", _mm(vehicle.front_overhang_mm)),
+        ("Överhäng bak", _mm(vehicle.rear_overhang_mm)),
+    ]
+
+
 @router.get("/{vehicle_id}/turning/pdf")
 def turning_pdf(
     vehicle_id: int,
@@ -149,11 +189,10 @@ def turning_pdf(
     c = canvas.Canvas(buf, pagesize=(page_w, page_h))
     margin = 15 * mm
 
-    veh_label = f"{vehicle.license_plate} · {vehicle.make or ''} {vehicle.model or ''}".strip(" ·")
-    top = draw_header(c, page_w, "Svängradie", veh_label, top_y=page_h - 10 * mm)
+    top = draw_header(c, page_w, "Svängradie", _vehicle_label(vehicle), top_y=page_h - 10 * mm)
 
     # ── Ritområde (höger del av sidan) ──
-    plot_left = margin + 78 * mm            # lämna plats för infopanel till vänster
+    plot_left = margin + 78 * mm            # lämna plats för infopanelerna till vänster
     plot_right = page_w - margin
     plot_top = top - 4 * mm
     plot_bottom = margin
@@ -219,36 +258,27 @@ def turning_pdf(
     c.setFillColor(colors.HexColor("#e5484d"))
     c.circle(cen[0], cen[1], 3, fill=1, stroke=0)
 
-    # ── Infopanel (vänster) ──
+    # ── Infopaneler (vänster) ──
     px, pw = margin, 70 * mm
     py_top = top - 6 * mm
+
     n_axles = len(res.axle_angles)
     n_steered = sum(1 for a in res.axle_angles if a["steered"])
-    rows = [
+    result_rows = [
         ("Styrvinkel fram", f"{res.steering_angle:g}°"),
         ("Antal axlar", f"{n_axles} ({n_steered} styrbara)"),
-        ("Bredd", f"{vehicle.width_mm} mm"),
-        ("Ytterradie R ut", f"{res.r_out:,.0f} mm".replace(",", " ")),
-        ("Innerradie R in", f"{res.r_in:,.0f} mm".replace(",", " ")),
-        ("Framaxel R fram", f"{res.r_front:,.0f} mm".replace(",", " ")),
-        ("Svepbredd", f"{res.swept_width:,.0f} mm".replace(",", " ")),
+        ("Ytterradie R ut", _mm(res.r_out)),
+        ("Innerradie R in", _mm(res.r_in)),
+        ("Framaxel R fram", _mm(res.r_front)),
+        ("Svepbredd", _mm(res.swept_width)),
     ]
     # Extra rad per styrbar axel utöver den främre
     for i, a in enumerate(res.axle_angles):
         if a["steered"] and i > 0:
-            rows.append((f"Styrvinkel axel {i+1}", f"{a['angle']:g}°"))
-    ph = 16 + len(rows) * 15
-    c.setFillColor(colors.HexColor("#2f6fed")); c.setFillAlpha(0.05)
-    c.roundRect(px, py_top - ph, pw, ph, 6, fill=1, stroke=0); c.setFillAlpha(1)
-    c.setStrokeColor(colors.HexColor("#c3ccd6")); c.setLineWidth(0.8)
-    c.roundRect(px, py_top - ph, pw, ph, 6, fill=0, stroke=1)
-    yy = py_top - 15
-    for label, value in rows:
-        c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#5a6675"))
-        c.drawString(px + 8, yy, label)
-        c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.black)
-        c.drawRightString(px + pw - 8, yy, value)
-        yy -= 15
+            result_rows.append((f"Styrvinkel axel {i+1}", f"{a['angle']:g}°"))
+
+    py = draw_info_panel(c, px, py_top, pw, "Svängradie", result_rows)
+    draw_info_panel(c, px, py - 8, pw, "Fordonsdata", _vehicle_rows(vehicle))
 
     c.save()
     buf.seek(0)

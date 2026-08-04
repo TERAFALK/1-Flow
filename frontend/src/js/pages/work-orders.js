@@ -736,6 +736,8 @@ async function loadOverviewGantt(orderId) {
               `<button type="button" data-scale="${key}" class="${key === ganttScale ? 'active' : ''}">${s.label}</button>`
             ).join('')}
           </div>
+          <button class="btn btn-ghost btn-sm" id="print-gantt-btn" title="Skriv ut i liggande A4">${PRINT_ICON} Skriv ut</button>
+          <button class="btn btn-ghost btn-sm" id="download-gantt-btn" title="Ladda ner som PDF">${DOWNLOAD_ICON}</button>
         </div>
       </div>
       <div class="card-body" style="padding:0">
@@ -772,6 +774,17 @@ async function loadOverviewGantt(orderId) {
     ganttScale = btn.dataset.scale;
     ganttScaleChosen = true;
     loadOverviewGantt(orderId);
+  });
+
+  // Utskriften är alltid liggande A4 och skalas för att rymma hela perioden –
+  // zoomnivån på skärmen påverkar den inte
+  const ganttPdf = `/work-orders/${orderId}/gantt/pdf`;
+  document.getElementById('print-gantt-btn').addEventListener('click', async () => {
+    try { await printFile(ganttPdf); } catch (err) { showToast(err.message, 'error'); }
+  });
+  document.getElementById('download-gantt-btn').addEventListener('click', async () => {
+    try { await downloadFile(ganttPdf, `gantt-order-${orderId}.pdf`); }
+    catch (err) { showToast(err.message, 'error'); }
   });
 
   // Scrolla fram dagens datum (eller projektstart) istället för att börja i kanten

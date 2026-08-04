@@ -1,18 +1,19 @@
 import io
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy import nulls_last
 from sqlalchemy.orm import Session, joinedload
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.lib import colors
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 from ..database import get_db
 from ..deps import get_current_user
-from ..pdf_utils import draw_header, draw_paragraph, wrap_lines
+from ..pdf_utils import draw_header, draw_paragraph, wrap_lines, truncate
 from ..schemas import (
     WorkOrderCreate, WorkOrderUpdate, WorkOrderOut, WorkOrderListItem,
     WorkOrderLineCreate, WorkOrderLineUpdate, WorkOrderLineOut, WorkOrderLineBulkCreate,
@@ -21,6 +22,7 @@ from ..schemas import (
 from ..models import (
     WorkOrder, WorkOrderLine, WorkOrderStatus, Article, StockTransaction,
     StockTransactionType, User, Customer, Vehicle, TimeEntry, Settings, Task,
+    WorkOrderPhase,
 )
 
 router = APIRouter(prefix="/api/work-orders", tags=["work-orders"])
@@ -767,6 +769,297 @@ def tasks_pdf(
     c.save()
     buf.seek(0)
     filename = f"uppgifter-{wo.order_number}.pdf"
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Gantt-schema (PDF, liggande) ──────────────────────────────────────────────
+
+_SV_MONTHS = ("januari", "februari", "mars", "april", "maj", "juni",
+              "juli", "augusti", "september", "oktober", "november", "december")
+
+_STATUS_LABELS = {
+    WorkOrderStatus.ny: "Ny",
+    WorkOrderStatus.planerad: "Planerad",
+    WorkOrderStatus.pagaende: "Pågående",
+    WorkOrderStatus.klar: "Klar",
+    WorkOrderStatus.fakturerad: "Fakturerad",
+}
+
+
+def _phase_span(p: WorkOrderPhase):
+    """(start, slut) som datum, eller None om fasen saknar datum.
+
+    En fas med bara ett av datumen behandlas som endagsaktivitet, och omvända
+    intervall rätas ut så att ritkoden slipper specialfall."""
+    start = p.start_date.date() if p.start_date else None
+    end = p.end_date.date() if p.end_date else None
+    if not start and not end:
+        return None
+    start = start or end
+    end = end or start
+    return (end, start) if end < start else (start, end)
+
+
+def _fmt_day(d: date) -> str:
+    return f"{d.day} {_SV_MONTHS[d.month - 1][:3]}"
+
+
+@router.get("/{order_id}/gantt/pdf")
+def gantt_pdf(
+    order_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Gantt-schemat i liggande A4. Tidsaxeln skalas så att hela perioden får plats."""
+    wo = _get_wo(db, order_id)
+    phases = (
+        db.query(WorkOrderPhase)
+        .filter(WorkOrderPhase.work_order_id == order_id)
+        .order_by(WorkOrderPhase.sort_order, nulls_last(WorkOrderPhase.start_date), WorkOrderPhase.id)
+        .all()
+    )
+
+    buf = io.BytesIO()
+    page_w, page_h = landscape(A4)
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+    margin = 18 * mm
+    subtitle = _wo_subtitle(wo)
+
+    def page_top():
+        return draw_header(c, page_w, "Gantt-schema", subtitle, top_y=page_h - 10 * mm)
+
+    top = page_top()
+
+    # Kompakt metarad – i liggande format är höjden dyrare än bredden
+    veh = ""
+    if wo.vehicle:
+        veh = f"{wo.vehicle.license_plate} {wo.vehicle.make or ''} {wo.vehicle.model or ''}".strip()
+    meta = " · ".join(x for x in [
+        wo.customer.name if wo.customer else None,
+        veh or None,
+        f"Ansvarig: {wo.assigned_to_user.full_name}" if wo.assigned_to_user else None,
+        f"Status: {_STATUS_LABELS.get(wo.status, wo.status.value)}",
+    ] if x)
+    c.setFont("Helvetica", 9)
+    c.setFillColor(colors.HexColor("#5a6675"))
+    c.drawString(margin, top, meta)
+    c.setFillColor(colors.black)
+    top -= 16
+
+    spans = {p.id: _phase_span(p) for p in phases}
+    dated = [p for p in phases if spans[p.id]]
+    undated = [p for p in phases if not spans[p.id]]
+
+    if not phases:
+        c.setFont("Helvetica-Oblique", 10)
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawString(margin, top - 20, "Inga faser tillagda på denna arbetsorder")
+        c.setFillColor(colors.black)
+        c.save()
+        buf.seek(0)
+        return StreamingResponse(
+            buf, media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="gantt-{wo.order_number}.pdf"'},
+        )
+
+    # ── Tidsaxelns omfång: hela veckor med luft, dagens datum alltid med ──
+    today = date.today()
+    starts = [spans[p.id][0] for p in dated] or [today]
+    ends = [spans[p.id][1] for p in dated] or [today]
+    lo_raw, hi_raw = min(starts), max(ends)
+    monday = lambda d: d - timedelta(days=d.weekday())
+    lo = monday(min(lo_raw, today) - timedelta(days=3))
+    hi = monday(max(hi_raw, today) + timedelta(days=3)) + timedelta(days=6)
+    total_days = max((hi - lo).days + 1, 7)
+
+    label_w = 64 * mm
+    tl_x = margin + label_w
+    tl_w = page_w - margin - tl_x
+    ppd = tl_w / total_days           # pixlar per dag
+    x_at = lambda d: tl_x + (d - lo).days * ppd
+
+    axis_h = 30
+    footer_y = margin + 12
+    avail_h = top - axis_h - footer_y - 10
+    rows_per_page = max(1, int(avail_h // 17))
+    # Få faser ska inte klumpa ihop sig i överkanten – sprid ut dem över sidan
+    row_h = min(34.0, avail_h / len(phases)) if len(phases) <= rows_per_page else 17.0
+    bar_h = min(14.0, row_h - 5)
+
+    # Detaljnivå efter hur mycket plats en dag får. Utan detta tappar t.ex. ett
+    # tvåårigt projekt alla tidsetiketter, och rutnätet blir ett brusigt raster.
+    tick_mode = "dag" if ppd >= 13 else ("vecka" if ppd * 7 >= 22 else "år")
+
+    def _next_month(d):
+        return date(d.year + (d.month == 12), (d.month % 12) + 1, 1)
+
+    def draw_axis(y_top):
+        """Månadsband + tickrad. Returnerar y för första raden."""
+        band_y = y_top - 13
+        c.setFont("Helvetica-Bold", 8)
+        d = date(lo.year, lo.month, 1)
+        while d <= hi:
+            nxt = _next_month(d)
+            seg_lo, seg_hi = max(d, lo), min(nxt - timedelta(days=1), hi)
+            x0, x1 = x_at(seg_lo), x_at(seg_hi) + ppd
+            w = x1 - x0
+            # Fullt namn om det ryms, annars trebokstavsform, annars bara linjen
+            full = f"{_SV_MONTHS[d.month - 1]} {d.year}"
+            short = _SV_MONTHS[d.month - 1][:3]
+            label = ""
+            if stringWidth(full, "Helvetica-Bold", 8) + 6 <= w:
+                label = full
+            elif stringWidth(short, "Helvetica-Bold", 8) + 5 <= w:
+                label = short
+            if label:
+                c.setFillColor(colors.HexColor("#5a6675"))
+                c.drawString(x0 + 3, band_y + 2, label)
+            c.setStrokeColor(colors.HexColor("#c3ccd6"))
+            c.setLineWidth(0.8)
+            c.line(x0, band_y - 2, x0, y_top)
+            d = nxt
+
+        tick_y = band_y - 11
+        c.setFont("Helvetica", 7)
+        c.setFillColor(colors.HexColor("#8a94a3"))
+        if tick_mode == "dag":
+            d = lo
+            while d <= hi:
+                c.drawCentredString(x_at(d) + ppd / 2, tick_y, str(d.day))
+                d += timedelta(days=1)
+        elif tick_mode == "vecka":
+            d = monday(lo)
+            while d <= hi:
+                c.drawCentredString(x_at(d) + ppd * 3.5, tick_y, f"v.{d.isocalendar()[1]}")
+                d += timedelta(days=7)
+        else:
+            # Månadsbandet visar bara korta namn utan årtal – sätt årtalen här
+            c.setFont("Helvetica-Bold", 7.5)
+            for year in range(lo.year, hi.year + 1):
+                y_lo = max(date(year, 1, 1), lo)
+                y_hi = min(date(year, 12, 31), hi)
+                x0, x1 = x_at(y_lo), x_at(y_hi) + ppd
+                if x1 - x0 > 30:
+                    c.drawCentredString((x0 + x1) / 2, tick_y, str(year))
+        c.setFillColor(colors.black)
+
+        c.setStrokeColor(colors.HexColor("#c3ccd6"))
+        c.setLineWidth(0.8)
+        c.line(margin, tick_y - 5, page_w - margin, tick_y - 5)
+        return tick_y - 5
+
+    def draw_grid(y_from, y_to):
+        """Rutnät, helgmarkering och dagens datum – ritas bakom staplarna."""
+        if tick_mode == "år":
+            # Varannan månad tonad; veckolinjer skulle bli ett tätt raster
+            d = date(lo.year, lo.month, 1)
+            while d <= hi:
+                nxt = _next_month(d)
+                if d.month % 2 == 0:
+                    x0 = x_at(max(d, lo))
+                    x1 = x_at(min(nxt - timedelta(days=1), hi)) + ppd
+                    c.setFillColor(colors.HexColor("#f4f6f8"))
+                    c.rect(x0, y_to, x1 - x0, y_from - y_to, fill=1, stroke=0)
+                d = nxt
+        else:
+            d = lo
+            while d <= hi:
+                if d.weekday() in (5, 6):
+                    c.setFillColor(colors.HexColor("#f1f3f6"))
+                    c.rect(x_at(d), y_to, ppd, y_from - y_to, fill=1, stroke=0)
+                d += timedelta(days=1)
+            d = monday(lo)
+            while d <= hi:
+                c.setStrokeColor(colors.HexColor("#e2e5e9"))
+                c.setLineWidth(0.5)
+                c.line(x_at(d), y_to, x_at(d), y_from)
+                d += timedelta(days=7)
+
+        if lo <= today <= hi:
+            c.setStrokeColor(colors.HexColor("#E2001A"))
+            c.setLineWidth(1.1)
+            c.setDash(3, 2)
+            c.line(x_at(today) + ppd / 2, y_to, x_at(today) + ppd / 2, y_from)
+            c.setDash()
+        c.setFillColor(colors.black)
+        c.setStrokeColor(colors.black)
+
+    ordered = dated + undated
+    pages = [ordered[i:i + rows_per_page] for i in range(0, len(ordered), rows_per_page)]
+
+    for page_no, chunk in enumerate(pages):
+        if page_no:
+            c.showPage()
+            top = page_top() - 16
+        y = draw_axis(top)
+        draw_grid(y, y - len(chunk) * row_h)
+
+        for p in chunk:
+            y -= row_h
+            mid = y + row_h / 2          # radens mitt – allt innehåll centreras här
+            text_y = mid - 3
+            span = spans[p.id]
+            color = colors.HexColor(p.color or "#E2001A")
+
+            # Etikettkolumn
+            c.setFillColor(color)
+            c.roundRect(margin, mid - 3.5, 7, 7, 1.5, fill=1, stroke=0)
+            c.setFillColor(colors.black)
+            c.setFont("Helvetica-Bold", 8.5)
+            name_w = label_w - 20 - (24 if span else 0)
+            c.drawString(margin + 12, text_y, truncate(p.name, "Helvetica-Bold", 8.5, name_w))
+
+            if not span:
+                c.setFont("Helvetica-Oblique", 8)
+                c.setFillColor(colors.HexColor("#8a94a3"))
+                c.drawString(tl_x + 4, text_y, "Inget datum angivet")
+                c.setFillColor(colors.black)
+                continue
+
+            start, end = span
+            days = (end - start).days + 1
+            c.setFont("Helvetica", 7.5)
+            c.setFillColor(colors.HexColor("#8a94a3"))
+            c.drawRightString(tl_x - 6, text_y, f"{days} d")
+            c.setFillColor(colors.black)
+
+            # Stapel
+            bx = x_at(start)
+            bw = max(days * ppd, 3)
+            c.setFillColor(color)
+            c.roundRect(bx, mid - bar_h / 2, bw, bar_h, 2.5, fill=1, stroke=0)
+
+            period = f"{_fmt_day(start)} – {_fmt_day(end)}"
+            c.setFont("Helvetica-Bold", 7)
+            period_w = stringWidth(period, "Helvetica-Bold", 7)
+            if period_w + 10 <= bw:
+                c.setFillColor(colors.white)
+                c.drawCentredString(bx + bw / 2, text_y + 0.5, period)
+            elif bx + bw + 6 + period_w < page_w - margin:
+                c.setFillColor(colors.HexColor("#5a6675"))
+                c.drawString(bx + bw + 5, text_y + 0.5, period)
+            else:
+                c.setFillColor(colors.HexColor("#5a6675"))
+                c.drawRightString(bx - 4, text_y + 0.5, period)
+            c.setFillColor(colors.black)
+
+        # Sidfot
+        c.setFont("Helvetica", 7.5)
+        c.setFillColor(colors.HexColor("#8a94a3"))
+        c.drawString(margin, footer_y, f"Period: {_fmt_day(lo_raw)} – {_fmt_day(hi_raw)}")
+        if lo <= today <= hi:
+            c.drawCentredString(page_w / 2, footer_y, f"Röd streckad linje = idag ({_fmt_day(today)})")
+        c.drawRightString(page_w - margin, footer_y,
+                          f"Utskriven {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                          + (f" · sida {page_no + 1}/{len(pages)}" if len(pages) > 1 else ""))
+        c.setFillColor(colors.black)
+
+    c.save()
+    buf.seek(0)
+    filename = f"gantt-{wo.order_number}.pdf"
     return StreamingResponse(
         buf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},

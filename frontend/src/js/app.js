@@ -150,9 +150,71 @@ async function route() {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-function showLogin() {
+function setLoginPane(mode, persist = true) {
+  const isTech = mode === 'tech';
+  document.getElementById('login-pane-tech').classList.toggle('hidden', !isTech);
+  document.getElementById('login-pane-admin').classList.toggle('hidden', isTech);
+  // Ett påtvingat byte (t.ex. teknikerlistan gick inte att hämta) ska inte
+  // skriva över användarens normala inloggningsläge
+  if (persist) localStorage.setItem('flow_login_mode', mode);
+  // Lämna aldrig kvar lösenord eller felmeddelanden när nästa person kliver fram
+  ['login-tech-password', 'login-password'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['login-tech-error', 'login-error'].forEach(id => {
+    document.getElementById(id)?.classList.add('hidden');
+  });
+  document.getElementById(isTech ? 'login-tech-password' : 'login-email')?.focus();
+}
+
+function showLogin(mode, persist = true) {
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app').classList.add('hidden');
+  // Släpp föregående användares data ur DOM:en
+  const content = document.getElementById('page-content');
+  if (content) content.innerHTML = '';
+  setLoginPane(mode || localStorage.getItem('flow_login_mode') || 'tech', persist);
+}
+
+/** Fyller teknikerväljaren. Returnerar ett felmeddelande vid problem, annars null. */
+async function loadTechnicians() {
+  const sel = document.getElementById('login-tech-user');
+  try {
+    const techs = await api.get('/auth/technicians');
+    if (!techs.length) {
+      sel.innerHTML = '';  // lämna inga inaktuella namn kvar i väljaren
+      return 'Inga tekniker är upplagda ännu – logga in som administratör.';
+    }
+    const last = localStorage.getItem('flow_last_tech');
+    sel.innerHTML = techs.map(t =>
+      `<option value="${t.id}"${String(t.id) === last ? ' selected' : ''}>${t.full_name}</option>`
+    ).join('');
+    return null;
+  } catch {
+    sel.innerHTML = '';
+    return 'Kunde inte hämta teknikerlistan – logga in med e-post.';
+  }
+}
+
+/** Visar inloggningsskärmen och faller tillbaka på admin om väljaren inte går att använda.
+ *
+ * En utgången session når hit två gånger (via flow:unauthorized och via
+ * bootstrap-fallbacken). Det är ofarligt: anropen är samtidiga, GET:en är publik
+ * och idempotent, och båda leder till samma sluttillstånd.
+ */
+async function openLoginScreen(preferredMode) {
+  const problem = await loadTechnicians();
+  // Utan tekniker finns inget att växla tillbaka till
+  document.getElementById('login-switch-tech')?.classList.toggle('hidden', !!problem);
+  if (problem) {
+    showLogin('admin', false);
+    const errEl = document.getElementById('login-error');
+    errEl.textContent = problem;
+    errEl.classList.remove('hidden');  // efter showLogin, som tömmer felrutorna
+  } else {
+    showLogin(preferredMode);
+  }
 }
 
 function showApp(user) {
@@ -166,7 +228,9 @@ function showApp(user) {
     document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('hidden'));
   } else {
-    // Tekniker: show only the scanner in the sidebar
+    // Tekniker: show only the scanner in the sidebar. Byte av användare sker utan
+    // omladdning, så adminmarkerade element måste aktivt döljas igen.
+    document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.nav-item').forEach(el => {
       el.classList.toggle('hidden', el.dataset.page !== 'scanner');
     });
@@ -180,6 +244,52 @@ function landingRoute(user) {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Technician login (dropdown + password)
+  document.getElementById('login-form-tech').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const sel = document.getElementById('login-tech-user');
+    const password = document.getElementById('login-tech-password').value;
+    const errEl = document.getElementById('login-tech-error');
+    const btn = document.getElementById('login-tech-btn');
+    errEl.classList.add('hidden');
+    btn.disabled = true;
+    btn.textContent = 'Loggar in…';
+    try {
+      const result = await api.post('/auth/login-technician', {
+        user_id: Number(sel.value),
+        password,
+      });
+      localStorage.setItem('flow_token', result.access_token);
+      localStorage.setItem('flow_user', JSON.stringify(result.user));
+      localStorage.setItem('flow_last_tech', String(result.user.id));
+      localStorage.setItem('flow_login_mode', 'tech');
+      showApp(result.user);
+      window.location.hash = landingRoute(result.user);
+      route();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Logga in';
+    }
+  });
+
+  // Switch between the two login panes
+  document.getElementById('show-admin-login').addEventListener('click', (e) => {
+    e.preventDefault();
+    setLoginPane('admin');
+  });
+  document.getElementById('show-tech-login').addEventListener('click', async (e) => {
+    e.preventDefault();
+    // Listan kan ha misslyckats vid uppstart – gör om försöket innan vi växlar
+    if (!document.getElementById('login-tech-user').options.length) {
+      await openLoginScreen('tech');
+      return;
+    }
+    setLoginPane('tech');
+  });
+
   // Login form
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -194,6 +304,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const result = await api.post('/auth/login', { email, password });
       localStorage.setItem('flow_token', result.access_token);
       localStorage.setItem('flow_user', JSON.stringify(result.user));
+      localStorage.setItem('flow_login_mode', 'admin');
       showApp(result.user);
       window.location.hash = landingRoute(result.user);
       route();
@@ -206,31 +317,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Logout
+  // Logout – tillbaka till teknikerväljaren för snabb växling mellan pass
   document.getElementById('logout-btn').addEventListener('click', () => {
     localStorage.removeItem('flow_token');
     localStorage.removeItem('flow_user');
-    showLogin();
+    openLoginScreen('tech');
   });
 
-  // Token expired / unauthorized
-  window.addEventListener('flow:unauthorized', () => showLogin());
+  // Token expired / unauthorized – behåll senast använda inloggningsläge
+  window.addEventListener('flow:unauthorized', () => openLoginScreen());
 
   // Check existing session
   const token = localStorage.getItem('flow_token');
   const userJson = localStorage.getItem('flow_user');
+  let restored = false;
   if (token && userJson) {
     try {
       const user = await api.get('/users/me');
       localStorage.setItem('flow_user', JSON.stringify(user));
       showApp(user);
       route();
-    } catch {
-      showLogin();
-    }
-  } else {
-    showLogin();
+      restored = true;
+    } catch { /* sessionen gick inte att återställa – visa inloggningen nedan */ }
   }
+  if (!restored) await openLoginScreen();
 
   window.addEventListener('hashchange', route);
 

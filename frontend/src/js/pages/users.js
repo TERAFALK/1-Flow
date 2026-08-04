@@ -102,7 +102,7 @@ function openUserForm(user, onSaved) {
         ` : ''}
         <div class="field">
           <label>${user ? 'Nytt lösenord (lämna tomt för att behålla)' : 'Lösenord *'}</label>
-          <input type="password" name="password" ${!user ? 'required' : ''} minlength="4">
+          <input type="password" name="password" ${!user ? 'required' : ''}>
         </div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>

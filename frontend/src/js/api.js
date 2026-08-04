@@ -10,7 +10,10 @@ async function request(url, options = {}) {
 
   const res = await fetch(`${BASE}${url}`, { ...options, headers });
 
-  if (res.status === 401) {
+  // 401 från inloggningen betyder "fel uppgifter", inte "utgången session" – den
+  // ska visas i formulärets felruta, inte kasta tillbaka till inloggningsskärmen
+  // (vilket skulle dölja meddelandet och nollställa teknikerväljaren).
+  if (res.status === 401 && !url.startsWith('/auth/')) {
     localStorage.removeItem('flow_token');
     localStorage.removeItem('flow_user');
     window.dispatchEvent(new CustomEvent('flow:unauthorized'));

@@ -7,10 +7,17 @@ import jwt
 SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
+# Tekniker loggar in på en delad verkstadsdator – kortare session, ett arbetspass
+TECHNICIAN_TOKEN_EXPIRE_HOURS = 8
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        # bcrypt vägrar lösenord över 72 byte – det är ett felaktigt lösenord,
+        # inte ett serverfel
+        return False
 
 
 def hash_password(password: str) -> str:

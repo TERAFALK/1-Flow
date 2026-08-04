@@ -21,6 +21,18 @@ class Token(BaseModel):
     user: "UserOut"
 
 
+class TechnicianOption(BaseModel):
+    """Publik teknikerlista för inloggningsväljaren – avsiktligt bara id och namn."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    full_name: str
+
+
+class TechnicianLoginRequest(BaseModel):
+    user_id: int
+    password: str
+
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 class UserCreate(BaseModel):

@@ -893,6 +893,10 @@ function openConvertForm(lead, onSaved) {
 
 // ── Detaljvy: order ───────────────────────────────────────────────────────────
 
+// AOC ligger där de fyra gamla AOC-milstolparna låg (sort_order 160–190), så
+// avsnittet hamnar mellan Registrering och Fakturering precis som i Excel.
+const AOC_SECTION_ORDER = 160;
+
 export async function renderSalesOrderDetail(el, id) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
   const order = await api.get(`/sales/orders/${id}`);
@@ -906,12 +910,25 @@ export async function renderSalesOrderDetail(el, id) {
     ${order.lead_id ? `<a href="#/sales/${order.lead_id}" class="btn btn-secondary btn-sm">Visa förfrågan</a>` : ''}
     <button class="btn btn-primary btn-sm" id="edit-order-btn">Redigera</button>`;
 
-  // Milstolparna kommer sorterade från API:et – gruppera i samma ordning
-  const groups = [];
+  // Avsnitten är milstolpsgrupperna plus AOC. Milstolparna kommer sorterade från
+  // API:et, så gruppens plats ges av dess första milstolpe.
+  const sections = [];
   for (const m of order.milestones) {
-    let g = groups.find(x => x.label === m.group_label);
-    if (!g) { g = { label: m.group_label, items: [] }; groups.push(g); }
+    let g = sections.find(x => x.label === m.group_label);
+    if (!g) {
+      g = { label: m.group_label, order: m.sort_order, items: [] };
+      sections.push(g);
+    }
     g.items.push(m);
+  }
+  sections.push({ label: 'AOC', order: AOC_SECTION_ORDER, aoc: true, items: [] });
+  sections.sort((a, b) => a.order - b.order);
+
+  // Bilagor som hör till ett avsnitt. AOC-filerna följer med sitt eget intyg.
+  const filesByGroup = {};
+  for (const f of order.files || []) {
+    const key = f.group_label || '';
+    (filesByGroup[key] = filesByGroup[key] || []).push(f);
   }
 
   el.innerHTML = `
@@ -927,7 +944,7 @@ export async function renderSalesOrderDetail(el, id) {
     <div class="card" style="margin-bottom:16px">
       <div class="card-header">
         <span class="card-title">Orderuppgifter</span>
-        <div style="min-width:180px">${progressBar(order.milestones_done, order.milestones_total)}</div>
+        <div id="order-progress" style="min-width:180px">${progressBar(order.milestones_done, order.milestones_total)}</div>
       </div>
       <div class="card-body order-meta">
         ${metaRow('Tillverkningsnr', order.serial_number)}
@@ -947,19 +964,110 @@ export async function renderSalesOrderDetail(el, id) {
     </div>
 
     <div class="milestone-grid">
-      ${groups.map(g => `
-        <div class="card">
-          <div class="card-header"><span class="card-title">${esc(g.label)}</span></div>
-          <div class="card-body">
-            ${g.items.map(milestoneField).join('')}
-          </div>
-        </div>`).join('')}
+      ${sections.map(sec => sec.aoc
+        ? aocSectionHtml(order.aocs || [])
+        : sectionHtml(sec, filesByGroup[sec.label] || [])
+      ).join('')}
     </div>
   `;
 
   const reload = () => renderSalesOrderDetail(el, id);
   document.getElementById('edit-order-btn').addEventListener('click', () => openOrderForm(order, reload));
 
+  bindOrderSections(el, id, reload);
+}
+
+/** Ett vanligt avsnittskort: milstolpar överst, bilagor underst. */
+function sectionHtml(sec, files) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">${esc(sec.label)}</span>
+        ${uploadButton({ group: sec.label })}
+      </div>
+      <div class="card-body">
+        ${sec.items.map(milestoneField).join('')}
+        ${sectionFilesHtml(files)}
+      </div>
+    </div>`;
+}
+
+/** AOC-kortet: ett block per intyg, vart och ett med egna fält och egna filer. */
+function aocSectionHtml(aocs) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">AOC</span>
+        <button type="button" class="btn btn-secondary btn-sm" id="add-aoc-btn">+ Lägg till AOC</button>
+      </div>
+      <div class="card-body">
+        ${aocs.length ? aocs.map(aocHtml).join('') : `
+          <p style="font-size:13px;color:var(--text-3);margin:4px 0">
+            Inga AOC-intyg ännu. En order kan ha flera – lägg till ett per intyg.
+          </p>`}
+      </div>
+    </div>`;
+}
+
+function aocHtml(a) {
+  return `
+    <div class="aoc-item" data-aoc-id="${a.id}">
+      <div class="aoc-head">
+        <input type="text" class="aoc-nr" data-aoc-field="aoc_number"
+               value="${esc(a.aoc_number)}" placeholder="AOC-nr, t.ex. NB001">
+        <div style="flex:1"></div>
+        ${uploadButton({ aocId: a.id })}
+        <button type="button" class="btn-icon" title="Ta bort AOC" data-del-aoc="${a.id}">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        </button>
+      </div>
+      <div class="ms-row">
+        <label class="ms-label">Skickad – kund</label>
+        <input type="date" data-aoc-field="sent_customer" value="${a.sent_customer || ''}">
+      </div>
+      <div class="ms-row">
+        <label class="ms-label">Mailat – FFB</label>
+        <input type="date" data-aoc-field="mailed_ffb" value="${a.mailed_ffb || ''}">
+      </div>
+      <div class="ms-row">
+        <label class="ms-label">Kostnad EUR</label>
+        <input type="number" step="0.01" data-aoc-field="cost_eur" value="${a.cost_eur ?? ''}">
+      </div>
+      ${a.notes ? `<div class="aoc-notes">${esc(a.notes)}</div>` : ''}
+      ${sectionFilesHtml(a.files || [])}
+    </div>`;
+}
+
+/** Uppladdningsknapp. Filinputen ligger inuti etiketten, så ingen id-jonglering behövs. */
+function uploadButton({ group = null, aocId = null }) {
+  const attrs = aocId !== null
+    ? `data-upload-aoc="${aocId}"`
+    : `data-upload-group="${esc(group)}"`;
+  return `
+    <label class="btn btn-secondary btn-sm upload-btn" style="margin:0" title="Ladda upp fil">
+      + Fil<input type="file" ${attrs} style="display:none">
+    </label>`;
+}
+
+function sectionFilesHtml(files) {
+  if (!files.length) return '';
+  return `
+    <div class="section-files">
+      ${files.map(f => `
+        <div class="section-file">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;flex:none;opacity:.5">
+            <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/>
+          </svg>
+          <button type="button" class="link-btn" data-dl-order-file="${f.id}" data-name="${esc(f.original_name)}">${esc(f.original_name)}</button>
+          <span class="text-muted" style="font-size:11.5px">${f.size_bytes ? `${Math.round(f.size_bytes / 1024)} kB` : ''}</span>
+          <button type="button" class="btn-icon" title="Ta bort" data-del-order-file="${f.id}">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>`).join('')}
+    </div>`;
+}
+
+function bindOrderSections(el, id, reload) {
   // Direktsparande vid change – samma känsla som att fylla i en Excel-cell
   el.querySelectorAll('[data-ms-def]').forEach(input => {
     input.addEventListener('change', async () => {
@@ -971,13 +1079,94 @@ export async function renderSalesOrderDetail(el, id) {
       try {
         await api.put(`/sales/orders/${id}/milestones/${defId}`, body);
         input.closest('.ms-row')?.classList.toggle('done', !!(input.value || input.checked));
-        // Progressstapeln i sidhuvudet räknas om av servern
-        const fresh = await api.get(`/sales/orders/${id}`);
-        const holder = document.querySelector('.card-header [class*="ms-progress"]')?.parentElement;
-        if (holder) holder.innerHTML = progressBar(fresh.milestones_done, fresh.milestones_total);
+        await refreshProgress(id);
       } catch (err) { showToast(err.message, 'error'); }
     });
   });
+
+  // AOC-fälten sparas likadant, men mot sitt intyg
+  el.querySelectorAll('[data-aoc-field]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const aocId = input.closest('.aoc-item')?.dataset.aocId;
+      if (!aocId) return;
+      try {
+        await api.put(`/sales/orders/${id}/aocs/${aocId}`, {
+          [input.dataset.aocField]: input.value || null,
+        });
+        showToast('AOC sparat', 'success', 1500);
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+
+  document.getElementById('add-aoc-btn')?.addEventListener('click', async () => {
+    try {
+      await api.post(`/sales/orders/${id}/aocs`, {});
+      reload();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  el.querySelectorAll('[data-del-aoc]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!await confirmDialog('Ta bort AOC-intyget och dess filer?')) return;
+      try {
+        await api.delete(`/sales/orders/${id}/aocs/${btn.dataset.delAoc}`);
+        showToast('AOC borttaget', 'success');
+        reload();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+
+  // Uppladdning per avsnitt respektive per AOC
+  el.querySelectorAll('.upload-btn input[type="file"]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const qs = input.dataset.uploadAoc !== undefined
+        ? `aoc_id=${encodeURIComponent(input.dataset.uploadAoc)}`
+        : `group=${encodeURIComponent(input.dataset.uploadGroup)}`;
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        await uploadFile(`/sales/orders/${id}/files?${qs}`, fd);
+        showToast('Fil uppladdad', 'success');
+        reload();
+      } catch (err) {
+        showToast(err.message, 'error');
+        input.value = '';   // annars går samma fil inte att välja igen
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-dl-order-file]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await downloadFile(`/sales/orders/${id}/files/${btn.dataset.dlOrderFile}/download`, btn.dataset.name);
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+
+  el.querySelectorAll('[data-del-order-file]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!await confirmDialog('Ta bort filen?')) return;
+      try {
+        await api.delete(`/sales/orders/${id}/files/${btn.dataset.delOrderFile}`);
+        showToast('Fil borttagen', 'success');
+        reload();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+}
+
+/** Servern räknar om andelen klara milstolpar – hämta den istället för att gissa. */
+async function refreshProgress(id) {
+  const holder = document.getElementById('order-progress');
+  if (!holder) return;
+  try {
+    const fresh = await api.get(`/sales/orders/${id}`);
+    if (document.getElementById('order-progress')) {
+      holder.innerHTML = progressBar(fresh.milestones_done, fresh.milestones_total);
+    }
+  } catch { /* stapeln är kosmetisk – ett misslyckat anrop ska inte störa */ }
 }
 
 function milestoneField(m) {

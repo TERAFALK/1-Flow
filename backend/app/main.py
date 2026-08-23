@@ -252,6 +252,59 @@ def _run_migrations():
             updated_at TIMESTAMP DEFAULT NOW(),
             CONSTRAINT uq_order_milestone UNIQUE (order_id, def_id)
         )""",
+        # AOC blev egna rader – en order kan ha flera intyg (NB001, NB002, NB003)
+        """CREATE TABLE IF NOT EXISTS sales_order_aocs (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL REFERENCES sales_orders(id) ON DELETE CASCADE,
+            aoc_number VARCHAR,
+            sent_customer DATE,
+            mailed_ffb DATE,
+            cost_eur NUMERIC(12,2),
+            notes TEXT,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        # Bilagor per avsnitt (group_label) eller per AOC (aoc_id)
+        """CREATE TABLE IF NOT EXISTS sales_order_files (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL REFERENCES sales_orders(id) ON DELETE CASCADE,
+            group_label VARCHAR,
+            aoc_id INTEGER REFERENCES sales_order_aocs(id) ON DELETE CASCADE,
+            filename VARCHAR NOT NULL,
+            original_name VARCHAR NOT NULL,
+            mime_type VARCHAR,
+            size_bytes BIGINT,
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            uploaded_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_sales_order_files_group ON sales_order_files (group_label)",
+        # Kundens önskemål: FO-nr hör hemma bland ritningarna, inte under betalning.
+        # Seeden rör inte befintliga rader (ON CONFLICT DO NOTHING), så flytten
+        # måste göras här för installationer som redan har milstolpen.
+        "UPDATE sales_milestone_defs SET group_label = 'Ritningar' WHERE key = 'fo_nr'",
+        # De fyra AOC-milstolparna ersätts av sales_order_aocs. Raderna behålls
+        # inaktiva så att inget redan ifyllt värde raderas.
+        """UPDATE sales_milestone_defs SET is_active = FALSE
+           WHERE key IN ('aoc_nr','aoc_skickad_kund','aoc_mailat_ffb','aoc_kostnad_eur')""",
+        # Best effort-flytt av redan ifyllda AOC-värden till den nya tabellen.
+        # Texterna behålls ordagrant i notes istället för att gissa datum – flera
+        # celler innehöll två värden ("NB002    NB003"). NOT EXISTS gör satsen
+        # idempotent så en omstart inte skapar dubbletter.
+        """INSERT INTO sales_order_aocs (order_id, aoc_number, notes, sort_order, created_at)
+           SELECT m.order_id,
+                  MAX(CASE WHEN d.key = 'aoc_nr' THEN m.value_text END),
+                  NULLIF(concat_ws(chr(10),
+                      MAX(CASE WHEN d.key = 'aoc_skickad_kund' THEN 'Skickad – kund: ' || m.value_text END),
+                      MAX(CASE WHEN d.key = 'aoc_mailat_ffb'   THEN 'Mailat – FFB: '   || m.value_text END),
+                      MAX(CASE WHEN d.key = 'aoc_kostnad_eur'  THEN 'Kostnad EUR: '    || m.value_text END)
+                  ), ''),
+                  0, NOW()
+           FROM sales_order_milestones m
+           JOIN sales_milestone_defs d ON d.id = m.def_id
+           WHERE d.key IN ('aoc_nr','aoc_skickad_kund','aoc_mailat_ffb','aoc_kostnad_eur')
+             AND NULLIF(btrim(m.value_text), '') IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM sales_order_aocs a WHERE a.order_id = m.order_id)
+           GROUP BY m.order_id""",
     ]
     with engine.connect() as conn:
         for stmt in stmts:
@@ -291,38 +344,40 @@ _migrate_roles()
 # kan redigera dem under Inställningar. value_type 'text' används där Excel-
 # cellerna innehåller fritext snarare än ett datum ("x", "NB001 NB002",
 # "Finns ej enl FFB", eller två datum i samma cell när ordern har två AOC).
+# sort_order står uttryckligen i varje rad – inte som listindex – eftersom
+# befintliga installationer redan har sina värden och seeden inte skriver över
+# dem. Att lägga till eller ta bort en rad här får därför inte flytta de andra.
+# AOC saknas med flit: de intygen är egna rader i sales_order_aocs sedan
+# kunden behövde kunna ha flera per order.
 SALES_MILESTONE_SEED = [
-    # (key, group_label, label, value_type)
-    ("orderbekraftelse",        "Order & betalning",    "Orderbekräftelse",            "datum"),
-    ("bankpapper",              "Order & betalning",    "Bankpapper",                  "text"),
-    ("faktura_10",              "Order & betalning",    "Faktura 10 %",                "datum"),
-    ("faktura_10_betald",       "Order & betalning",    "Faktura 10 % betald",         "datum"),
-    ("order_signerad",          "Order & betalning",    "Order signerad",              "datum"),
-    ("fo_nr",                   "Order & betalning",    "FO-nr",                       "text"),
-    ("chassi_info",             "Ritningar",            "Chassi info",                 "datum"),
-    ("ritning_komplett",        "Ritningar",            "Komplett ritning med chassi", "datum"),
-    ("lack_forslag_kund",       "Lackering",            "Förslag – kund",              "datum"),
-    ("lack_forslag_ffb",        "Lackering",            "Förslag – FFB",               "datum"),
-    ("lack_slutlig_kund",       "Lackering",            "Slutlig – kund",              "datum"),
-    ("lack_slutlig_ffb",        "Lackering",            "Slutlig – FFB",               "datum"),
-    ("agare_fordon",            "Registrering",         "Ägare / fordon",              "text"),
-    ("ursprungskontroll",       "Registrering",         "Ursprungskontroll ansökan",   "datum"),
-    ("ursprung_paskrift_kund",  "Registrering",         "För påskrift av kund",        "datum"),
-    ("ursprung_postad_ts",      "Registrering",         "Postad till TS",              "datum"),
-    ("aoc_nr",                  "AOC",                  "AOC-nr",                      "text"),
-    ("aoc_skickad_kund",        "AOC",                  "Skickad – kund",              "text"),
-    ("aoc_mailat_ffb",          "AOC",                  "Mailat – FFB",                "text"),
-    ("aoc_kostnad_eur",         "AOC",                  "Kostnad EUR",                 "text"),
-    ("proforma_skickad_kund",   "Fakturering",          "Proforma skickad – kund",     "datum"),
-    ("faktura_adress",          "Fakturering",          "Faktura adress bekräftad",    "datum"),
-    ("noc_skickad_kund",        "Fakturering",          "NOC skickad – kund",          "datum"),
-    ("slutfaktura_skickad",     "Fakturering",          "Slutfaktura skickad – kund",  "datum"),
-    ("slutfaktura_betald",      "Fakturering",          "Slutfaktura betald",          "datum"),
-    ("reservdelskatalog",       "Dokumentation",        "Reservdelskatalog",           "datum"),
-    ("luft_el_ritningar",       "Dokumentation",        "Luft- & elritningar",         "datum"),
-    ("hemsida",                 "Dokumentation",        "Hemsida",                     "text"),
-    ("coa_paskrift_kund",       "COA / framkomstintyg", "För påskrift – kund",         "datum"),
-    ("coa_mail_ffb",            "COA / framkomstintyg", "Mail – FFB",                  "datum"),
+    # (key, group_label, label, value_type, sort_order)
+    ("orderbekraftelse",        "Order & betalning",    "Orderbekräftelse",             "datum",   0),
+    ("bankpapper",              "Order & betalning",    "Bankpapper",                   "text",   10),
+    ("faktura_10",              "Order & betalning",    "Faktura 10 %",                 "datum",  20),
+    ("faktura_10_betald",       "Order & betalning",    "Faktura 10 % betald",          "datum",  30),
+    ("order_signerad",          "Order & betalning",    "Order signerad",               "datum",  40),
+    ("fo_nr",                   "Ritningar",            "FO-nr",                        "text",   50),
+    ("chassi_info",             "Ritningar",            "Chassi info",                  "datum",  60),
+    ("ritning_komplett",        "Ritningar",            "Komplett ritning med chassi",  "datum",  70),
+    ("lack_forslag_kund",       "Lackering",            "Förslag – kund",               "datum",  80),
+    ("lack_forslag_ffb",        "Lackering",            "Förslag – FFB",                "datum",  90),
+    ("lack_slutlig_kund",       "Lackering",            "Slutlig – kund",               "datum", 100),
+    ("lack_slutlig_ffb",        "Lackering",            "Slutlig – FFB",                "datum", 110),
+    ("agare_fordon",            "Registrering",         "Ägare / fordon",               "text",  120),
+    ("ursprungskontroll",       "Registrering",         "Ursprungskontroll ansökan",    "datum", 130),
+    ("ursprung_paskrift_kund",  "Registrering",         "För påskrift av kund",         "datum", 140),
+    ("ursprung_postad_ts",      "Registrering",         "Postad till TS",               "datum", 150),
+    # 160–190 var AOC-milstolparna. AOC_SECTION_ORDER nedan håller platsen.
+    ("proforma_skickad_kund",   "Fakturering",          "Proforma skickad – kund",      "datum", 200),
+    ("faktura_adress",          "Fakturering",          "Faktura adress bekräftad",     "datum", 210),
+    ("noc_skickad_kund",        "Fakturering",          "NOC skickad – kund",           "datum", 220),
+    ("slutfaktura_skickad",     "Fakturering",          "Slutfaktura skickad – kund",   "datum", 230),
+    ("slutfaktura_betald",      "Fakturering",          "Slutfaktura betald",           "datum", 240),
+    ("reservdelskatalog",       "Dokumentation",        "Reservdelskatalog",            "datum", 250),
+    ("luft_el_ritningar",       "Dokumentation",        "Luft- & elritningar",          "datum", 260),
+    ("hemsida",                 "Dokumentation",        "Hemsida",                      "text",  270),
+    ("coa_paskrift_kund",       "COA / framkomstintyg", "För påskrift – kund",          "datum", 280),
+    ("coa_mail_ffb",            "COA / framkomstintyg", "Mail – FFB",                   "datum", 290),
 ]
 
 
@@ -332,13 +387,13 @@ def _seed_sales_milestones():
     from sqlalchemy import text
     try:
         with engine.connect() as conn:
-            for i, (key, group_label, label, value_type) in enumerate(SALES_MILESTONE_SEED):
+            for key, group_label, label, value_type, sort_order in SALES_MILESTONE_SEED:
                 conn.execute(
                     text("""INSERT INTO sales_milestone_defs
                                 (key, group_label, label, value_type, sort_order, is_active)
                             VALUES (:key, :grp, :label, :vt, :ord, TRUE)
                             ON CONFLICT (key) DO NOTHING"""),
-                    {"key": key, "grp": group_label, "label": label, "vt": value_type, "ord": i * 10},
+                    {"key": key, "grp": group_label, "label": label, "vt": value_type, "ord": sort_order},
                 )
             conn.commit()
     except Exception as e:

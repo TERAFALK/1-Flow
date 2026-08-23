@@ -1,8 +1,10 @@
+import os
 from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import FileResponse
 from sqlalchemy import or_, extract, func
 from sqlalchemy.orm import Session, joinedload
 
@@ -10,15 +12,19 @@ from ..database import get_db
 from ..deps import require_admin
 from ..models import (
     SalesOrder, SalesOrderMilestone, SalesMilestoneDef, SalesLead,
-    Customer, User,
+    SalesOrderAoc, SalesOrderFile, Customer, User,
 )
 from ..schemas import (
     SalesOrderCreate, SalesOrderUpdate, SalesOrderOut, SalesOrderListItem,
     SalesOrderMilestoneOut, SalesOrderMilestoneUpdate,
+    SalesOrderAocCreate, SalesOrderAocUpdate, SalesOrderAocOut, SalesOrderFileOut,
     SalesCommissionRow, SalesCommissionSummary,
 )
+from ..uploads import store_file, file_path, remove_file
 
 router = APIRouter(prefix="/api/sales/orders", tags=["sales-orders"])
+
+UPLOAD_ROOT = "/app/uploads/sales-orders"
 
 
 def _get(db: Session, order_id: int) -> SalesOrder:
@@ -27,6 +33,8 @@ def _get(db: Session, order_id: int) -> SalesOrder:
         .options(
             joinedload(SalesOrder.customer),
             joinedload(SalesOrder.milestones).joinedload(SalesOrderMilestone.definition),
+            joinedload(SalesOrder.aocs).joinedload(SalesOrderAoc.files),
+            joinedload(SalesOrder.files),
         )
         .filter(SalesOrder.id == order_id)
         .first()
@@ -91,12 +99,33 @@ def order_out(db: Session, order_id: int) -> SalesOrderOut:
     _ensure_milestones(db, order)
     milestones = [m for m in order.milestones if m.definition and m.definition.is_active]
     milestones.sort(key=lambda m: (m.definition.sort_order, m.definition.id))
+    aocs = sorted(order.aocs, key=lambda a: (a.sort_order or 0, a.id))
     return SalesOrderOut(
         **_list_fields(order),
         notes=order.notes,
         created_at=order.created_at,
         updated_at=order.updated_at,
         milestones=[_milestone_out(m) for m in milestones],
+        aocs=[_aoc_out(a) for a in aocs],
+        # Bara avsnittsbilagorna här – AOC-filerna följer med sitt AOC ovan
+        files=[
+            SalesOrderFileOut.model_validate(f)
+            for f in sorted(order.files, key=lambda f: f.id)
+            if f.aoc_id is None
+        ],
+    )
+
+
+def _aoc_out(aoc: SalesOrderAoc) -> SalesOrderAocOut:
+    return SalesOrderAocOut(
+        id=aoc.id,
+        aoc_number=aoc.aoc_number,
+        sent_customer=aoc.sent_customer,
+        mailed_ffb=aoc.mailed_ffb,
+        cost_eur=aoc.cost_eur,
+        notes=aoc.notes,
+        sort_order=aoc.sort_order,
+        files=[SalesOrderFileOut.model_validate(f) for f in sorted(aoc.files, key=lambda f: f.id)],
     )
 
 
@@ -282,3 +311,162 @@ def set_milestone(
     db.commit()
     db.refresh(milestone)
     return _milestone_out(milestone)
+
+
+# ── AOC-intyg ─────────────────────────────────────────────────────────────────
+
+def _get_aoc(db: Session, order_id: int, aoc_id: int) -> SalesOrderAoc:
+    aoc = db.query(SalesOrderAoc).filter(
+        SalesOrderAoc.id == aoc_id, SalesOrderAoc.order_id == order_id
+    ).first()
+    if not aoc:
+        raise HTTPException(status_code=404, detail="AOC ej hittat")
+    return aoc
+
+
+@router.get("/{order_id}/aocs", response_model=List[SalesOrderAocOut])
+def list_aocs(order_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    order = _get(db, order_id)
+    return [_aoc_out(a) for a in sorted(order.aocs, key=lambda a: (a.sort_order or 0, a.id))]
+
+
+@router.post("/{order_id}/aocs", response_model=SalesOrderAocOut, status_code=status.HTTP_201_CREATED)
+def create_aoc(
+    order_id: int,
+    body: SalesOrderAocCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    order = _get(db, order_id)
+    data = body.model_dump()
+    if data.get("sort_order") is None:
+        # Nya intyg hamnar sist – NB001, NB002, NB003 i den ordning de utfärdas
+        data["sort_order"] = max((a.sort_order or 0 for a in order.aocs), default=-10) + 10
+    aoc = SalesOrderAoc(order_id=order_id, **data)
+    db.add(aoc)
+    db.commit()
+    db.refresh(aoc)
+    return _aoc_out(aoc)
+
+
+@router.put("/{order_id}/aocs/{aoc_id}", response_model=SalesOrderAocOut)
+def update_aoc(
+    order_id: int,
+    aoc_id: int,
+    body: SalesOrderAocUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    aoc = _get_aoc(db, order_id, aoc_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(aoc, field, value)
+    db.commit()
+    db.refresh(aoc)
+    return _aoc_out(aoc)
+
+
+@router.delete("/{order_id}/aocs/{aoc_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_aoc(
+    order_id: int,
+    aoc_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    aoc = _get_aoc(db, order_id, aoc_id)
+    # Databasens cascade tar filraderna, men inte bytena på disken
+    for f in aoc.files:
+        remove_file(UPLOAD_ROOT, order_id, f.filename)
+    db.delete(aoc)
+    db.commit()
+
+
+# ── Bilagor per avsnitt eller AOC ─────────────────────────────────────────────
+
+@router.get("/{order_id}/files", response_model=List[SalesOrderFileOut])
+def list_order_files(
+    order_id: int,
+    group: Optional[str] = None,
+    aoc_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    _get(db, order_id)
+    query = db.query(SalesOrderFile).filter(SalesOrderFile.order_id == order_id)
+    if group is not None:
+        query = query.filter(SalesOrderFile.group_label == group)
+    if aoc_id is not None:
+        query = query.filter(SalesOrderFile.aoc_id == aoc_id)
+    return query.order_by(SalesOrderFile.uploaded_at.desc()).all()
+
+
+@router.post("/{order_id}/files", response_model=SalesOrderFileOut, status_code=status.HTTP_201_CREATED)
+async def upload_order_file(
+    order_id: int,
+    group: Optional[str] = Query(None, description="Avsnittets rubrik, t.ex. Lackering"),
+    aoc_id: Optional[int] = Query(None, description="Bilaga till ett enskilt AOC-intyg"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    _get(db, order_id)
+    if aoc_id is not None:
+        # Kontrollera att intyget hör till ordern innan filen skrivs
+        _get_aoc(db, order_id, aoc_id)
+        group = None  # AOC-bilagor tillhör intyget, inte ett avsnitt
+
+    content = await file.read()
+    stored_name = store_file(UPLOAD_ROOT, order_id, file.filename or "", content)
+
+    record = SalesOrderFile(
+        order_id=order_id,
+        group_label=group,
+        aoc_id=aoc_id,
+        filename=stored_name,
+        original_name=file.filename or stored_name,
+        mime_type=file.content_type,
+        size_bytes=len(content),
+        uploaded_by=current_user.id,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@router.get("/{order_id}/files/{file_id}/download")
+def download_order_file(
+    order_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    record = db.query(SalesOrderFile).filter(
+        SalesOrderFile.id == file_id, SalesOrderFile.order_id == order_id
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Fil ej hittad")
+    path = file_path(UPLOAD_ROOT, order_id, record.filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Fil saknas på disk")
+    return FileResponse(
+        path,
+        filename=record.original_name,
+        media_type=record.mime_type or "application/octet-stream",
+    )
+
+
+@router.delete("/{order_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_order_file(
+    order_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    record = db.query(SalesOrderFile).filter(
+        SalesOrderFile.id == file_id, SalesOrderFile.order_id == order_id
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Fil ej hittad")
+    remove_file(UPLOAD_ROOT, order_id, record.filename)
+    db.delete(record)
+    db.commit()

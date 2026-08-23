@@ -1262,3 +1262,40 @@ tbody tr.clickable { cursor: pointer; }
 .order-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 24px; }
 .order-meta hr { grid-column: 1 / -1; }
 .order-meta p  { grid-column: 1 / -1; }
+
+/* ── Försäljning: bilagor per avsnitt och AOC-intyg ──────────────────────────── */
+
+.section-files {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.section-file { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.section-file .btn-icon { margin-left: auto; }
+
+/* Filnamn som ser ut som en länk men är en knapp – nedladdningen behöver
+   Authorization-huvudet och går därför via fetch, inte ett <a href>. */
+.link-btn {
+  background: none; border: none; padding: 0;
+  font: inherit; color: var(--accent); cursor: pointer;
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.link-btn:hover { text-decoration: underline; }
+
+.aoc-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--surface-2);
+}
+.aoc-item:last-child { margin-bottom: 0; }
+.aoc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.aoc-nr { font-weight: 700; max-width: 190px; }
+.aoc-notes {
+  font-size: 12px; color: var(--text-2);
+  white-space: pre-wrap;
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}

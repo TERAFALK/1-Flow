@@ -850,6 +850,42 @@ class SalesOrderUpdate(SalesOrderCreate):
     currency: Optional[str] = None
 
 
+class SalesOrderFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    group_label: Optional[str] = None
+    aoc_id: Optional[int] = None
+    original_name: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    uploaded_at: datetime
+
+
+class SalesOrderAocCreate(BaseModel):
+    aoc_number: Optional[str] = None
+    sent_customer: Optional[date] = None
+    mailed_ffb: Optional[date] = None
+    cost_eur: Optional[Decimal] = None
+    notes: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class SalesOrderAocUpdate(SalesOrderAocCreate):
+    pass
+
+
+class SalesOrderAocOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    aoc_number: Optional[str]
+    sent_customer: Optional[date]
+    mailed_ffb: Optional[date]
+    cost_eur: Optional[Decimal]
+    notes: Optional[str]
+    sort_order: Optional[int]
+    files: List[SalesOrderFileOut] = []
+
+
 class SalesOrderListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -880,6 +916,8 @@ class SalesOrderOut(SalesOrderListItem):
     created_at: datetime
     updated_at: Optional[datetime] = None
     milestones: List[SalesOrderMilestoneOut] = []
+    aocs: List[SalesOrderAocOut] = []
+    files: List[SalesOrderFileOut] = []
 
 
 class SalesCommissionRow(BaseModel):

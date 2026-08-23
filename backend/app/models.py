@@ -549,6 +549,59 @@ class SalesOrder(Base):
     milestones = relationship(
         "SalesOrderMilestone", back_populates="order", cascade="all, delete-orphan"
     )
+    aocs = relationship(
+        "SalesOrderAoc", back_populates="order",
+        cascade="all, delete-orphan", order_by="SalesOrderAoc.sort_order",
+    )
+    files = relationship(
+        "SalesOrderFile", back_populates="order", cascade="all, delete-orphan"
+    )
+
+
+class SalesOrderAoc(Base):
+    """Ett AOC-intyg. En order kan ha flera (NB001, NB002, NB003…), vilket i Excel
+    löstes genom att trycka in flera värden i samma cell ("NB002    NB003")."""
+    __tablename__ = "sales_order_aocs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("sales_orders.id"), nullable=False)
+    aoc_number = Column(String)                           # NB001
+    sent_customer = Column(Date)                          # skickad – kund
+    mailed_ffb = Column(Date)                             # mailat – FFB
+    cost_eur = Column(Numeric(12, 2))                     # kostnad EUR
+    notes = Column(Text)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    order = relationship("SalesOrder", back_populates="aocs")
+    files = relationship(
+        "SalesOrderFile", back_populates="aoc", cascade="all, delete-orphan"
+    )
+
+
+class SalesOrderFile(Base):
+    """Bilaga på en såld order. Antingen hör den till ett avsnitt (group_label,
+    t.ex. "Lackering") eller till ett enskilt AOC-intyg (aoc_id). Är båda tomma är
+    det en allmän orderbilaga.
+
+    group_label är etiketten från sales_milestone_defs och inte en nyckel – döps
+    ett avsnitt om via Inställningar hamnar äldre filer under det gamla namnet."""
+    __tablename__ = "sales_order_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("sales_orders.id"), nullable=False)
+    group_label = Column(String, index=True)
+    aoc_id = Column(Integer, ForeignKey("sales_order_aocs.id"))
+    filename = Column(String, nullable=False)             # uuid-namnet på disk
+    original_name = Column(String, nullable=False)
+    mime_type = Column(String)
+    size_bytes = Column(BigInteger)
+    uploaded_by = Column(Integer, ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    order = relationship("SalesOrder", back_populates="files")
+    aoc = relationship("SalesOrderAoc", back_populates="files")
+    uploader = relationship("User")
 
 
 class SalesMilestoneDef(Base):

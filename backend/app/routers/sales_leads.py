@@ -1,5 +1,4 @@
 import os
-import uuid
 from datetime import date
 from typing import List, Optional
 
@@ -20,6 +19,7 @@ from ..schemas import (
     SalesLeadNoteCreate, SalesLeadNoteOut, SalesLeadFileOut,
     SalesLeadConvert, SalesOrderOut, SalesPipelineStats,
 )
+from ..uploads import store_file, file_path, remove_file
 from .sales_orders import order_out
 
 router = APIRouter(prefix="/api/sales/leads", tags=["sales-leads"])
@@ -242,11 +242,8 @@ def delete_lead(lead_id: int, db: Session = Depends(get_db), _: User = Depends(r
     if db.query(SalesOrder.id).filter(SalesOrder.lead_id == lead_id).first():
         raise HTTPException(status_code=400, detail="Förfrågan har en order och kan inte tas bort")
     # Filerna på disk följer inte med databasens cascade
-    folder = os.path.join(UPLOAD_ROOT, str(lead_id))
     for f in lead.files:
-        path = os.path.join(folder, f.filename)
-        if os.path.exists(path):
-            os.remove(path)
+        remove_file(UPLOAD_ROOT, lead_id, f.filename)
     db.delete(lead)
     db.commit()
 
@@ -312,14 +309,8 @@ async def upload_lead_file(
 ):
     _get(db, lead_id)
 
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    stored_name = f"{uuid.uuid4()}{ext}"
-    folder = os.path.join(UPLOAD_ROOT, str(lead_id))
-    os.makedirs(folder, exist_ok=True)
-
     content = await file.read()
-    with open(os.path.join(folder, stored_name), "wb") as f:
-        f.write(content)
+    stored_name = store_file(UPLOAD_ROOT, lead_id, file.filename or "", content)
 
     record = SalesLeadFile(
         lead_id=lead_id,
@@ -347,7 +338,7 @@ def download_lead_file(
     ).first()
     if not record:
         raise HTTPException(status_code=404, detail="Fil ej hittad")
-    path = os.path.join(UPLOAD_ROOT, str(lead_id), record.filename)
+    path = file_path(UPLOAD_ROOT, lead_id, record.filename)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Fil saknas på disk")
     return FileResponse(
@@ -369,9 +360,7 @@ def delete_lead_file(
     ).first()
     if not record:
         raise HTTPException(status_code=404, detail="Fil ej hittad")
-    path = os.path.join(UPLOAD_ROOT, str(lead_id), record.filename)
-    if os.path.exists(path):
-        os.remove(path)
+    remove_file(UPLOAD_ROOT, lead_id, record.filename)
     db.delete(record)
     db.commit()
 

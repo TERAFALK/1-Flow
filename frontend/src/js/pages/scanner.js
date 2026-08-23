@@ -44,6 +44,11 @@ export async function renderScanner(el) {
         <div class="card" style="margin-bottom:16px;display:none" id="temp-list-card">
           <div class="card-header"><span class="card-title">Tillfällig lista</span></div>
           <div class="card-body">
+            <div class="field">
+              <label>Namn på listan</label>
+              <input type="text" id="temp-list-name" maxlength="120"
+                placeholder="t.ex. Servicebil 3 – påfyllning" autocomplete="off">
+            </div>
             <button class="btn btn-secondary" id="new-temp-list-btn" style="width:100%">+ Ny tillfällig lista</button>
             <div id="temp-list-info"></div>
           </div>
@@ -113,6 +118,7 @@ export async function renderScanner(el) {
   const tempCard      = document.getElementById('temp-list-card');
   const tempInfo      = document.getElementById('temp-list-info');
   const newTempBtn    = document.getElementById('new-temp-list-btn');
+  const tempNameInput = document.getElementById('temp-list-name');
   const printListBtn  = document.getElementById('print-scan-list-btn');
   const modeOrderRadio = document.getElementById('mode-order');
   const modeTempRadio  = document.getElementById('mode-temp');
@@ -120,6 +126,10 @@ export async function renderScanner(el) {
   let scanning = false;
   let mode = 'order'; // 'order' | 'temp'
   let tempListId = null;
+  let tempListTitle = '';
+
+  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   function currentTargetId() {
     return mode === 'order' ? orderSel.value : tempListId;
@@ -153,16 +163,65 @@ export async function renderScanner(el) {
     });
   });
 
-  newTempBtn.addEventListener('click', async () => {
+  /** Visar namnet på den aktiva listan med möjlighet att byta det. */
+  function renderTempInfo() {
+    if (!tempListId) { tempInfo.innerHTML = ''; return; }
+    tempInfo.innerHTML = `
+      <div class="alert alert-info" style="margin-top:12px;margin-bottom:0;display:flex;align-items:center;gap:8px">
+        <strong style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(tempListTitle)}</strong>
+        <button type="button" class="btn btn-ghost btn-sm" id="rename-temp-btn">Byt namn</button>
+      </div>
+    `;
+    const btn = document.getElementById('rename-temp-btn');
+    btn.disabled = scanning;
+    btn.addEventListener('click', showRenameForm);
+  }
+
+  function showRenameForm() {
+    // Skannern skriver in i det fält som har fokus – pausa medan namnet redigeras
+    stopScanning();
+    tempInfo.innerHTML = `
+      <div style="margin-top:12px;display:flex;gap:6px">
+        <input type="text" id="temp-rename-input" maxlength="120" autocomplete="off"
+          value="${esc(tempListTitle)}" style="flex:1;min-width:0">
+        <button type="button" class="btn btn-primary btn-sm" id="temp-rename-save">Spara</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="temp-rename-cancel">Avbryt</button>
+      </div>
+    `;
+    const field = document.getElementById('temp-rename-input');
+    field.focus();
+    field.select();
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveRename(); }
+      if (e.key === 'Escape') { e.preventDefault(); renderTempInfo(); }
+    });
+    document.getElementById('temp-rename-save').addEventListener('click', saveRename);
+    document.getElementById('temp-rename-cancel').addEventListener('click', renderTempInfo);
+  }
+
+  async function saveRename() {
+    const field = document.getElementById('temp-rename-input');
+    const title = (field?.value || '').trim();
+    if (!title) { showToast('Namnet kan inte vara tomt', 'error'); field?.focus(); return; }
+    if (title === tempListTitle) { renderTempInfo(); return; }
     try {
-      const title = `Tillfällig skanning ${new Date().toLocaleString('sv-SE')}`;
+      const pl = await api.put(`/pick-lists/${tempListId}`, { title });
+      tempListTitle = pl.title;
+      renderTempInfo();
+      showToast('Listan döptes om', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  newTempBtn.addEventListener('click', async () => {
+    // Utan angivet namn faller vi tillbaka på datum och tid, som tidigare
+    const title = tempNameInput.value.trim()
+      || `Tillfällig skanning ${new Date().toLocaleString('sv-SE')}`;
+    try {
       const pl = await api.post('/pick-lists', { title, lines: [] });
       tempListId = pl.id;
-      tempInfo.innerHTML = `
-        <div class="alert alert-info" style="margin-top:12px;margin-bottom:0">
-          <strong>${pl.title}</strong>
-        </div>
-      `;
+      tempListTitle = pl.title;
+      tempNameInput.value = '';
+      renderTempInfo();
       startBtn.disabled = false;
       linesCard.style.display = '';
       printListBtn.style.display = '';
@@ -171,10 +230,18 @@ export async function renderScanner(el) {
     } catch (err) { showToast(err.message, 'error'); }
   });
 
+  tempNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); newTempBtn.click(); }
+  });
+
   printListBtn.addEventListener('click', async () => {
     if (!tempListId) return;
+    // Låt listans namn styra filnamnet så nedladdningarna går att skilja åt
+    const slug = tempListTitle.toLowerCase()
+      .replace(/[åä]/g, 'a').replace(/ö/g, 'o')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
     try {
-      await downloadFile(`/pick-lists/${tempListId}/pdf`, `skanning-${tempListId}.pdf`);
+      await downloadFile(`/pick-lists/${tempListId}/pdf`, `${slug || 'skanning'}-${tempListId}.pdf`);
     } catch (err) { showToast(err.message, 'error'); }
   });
 
@@ -208,8 +275,17 @@ export async function renderScanner(el) {
     }
   });
 
+  /** Namnfälten låses under skanning – annars kan en streckkod hamna i dem. */
+  function setNameFieldsLocked(locked) {
+    tempNameInput.disabled = locked;
+    newTempBtn.disabled = locked;
+    const renameBtn = document.getElementById('rename-temp-btn');
+    if (renameBtn) renameBtn.disabled = locked;
+  }
+
   function startScanning() {
     scanning = true;
+    setNameFieldsLocked(true);
     input.readOnly = false;
     input.value = '';
     input.placeholder = 'Skanna nu…';
@@ -223,6 +299,7 @@ export async function renderScanner(el) {
 
   function stopScanning() {
     scanning = false;
+    setNameFieldsLocked(false);
     input.readOnly = true;
     input.value = '';
     input.placeholder = 'Väntar på scanner…';

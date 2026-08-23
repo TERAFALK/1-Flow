@@ -24,6 +24,7 @@ _TEKNIKER_ALLOWLIST: tuple[tuple[str, re.Pattern], ...] = (
     ("POST", re.compile(r"^/api/work-orders/\d+/scan$")),
     ("POST", re.compile(r"^/api/pick-lists$")),
     ("GET",  re.compile(r"^/api/pick-lists/\d+$")),
+    ("PUT",  re.compile(r"^/api/pick-lists/\d+$")),   # döpa om en tillfällig lista
     ("POST", re.compile(r"^/api/pick-lists/\d+/scan$")),
     ("GET",  re.compile(r"^/api/pick-lists/\d+/pdf$")),
 )

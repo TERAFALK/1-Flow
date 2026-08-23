@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { fmtDate, statusBadge } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { renderCustomerSales } from './sales.js';
 
 export async function renderCustomers(el) {
   let allRows = [];
@@ -126,6 +127,7 @@ export async function renderCustomerDetail(el, id) {
       <div class="tab" data-tab="contacts">Kontaktpersoner <span style="font-size:11px;opacity:.6">(${contacts.length})</span></div>
       <div class="tab" data-tab="vehicles">Fordon <span style="font-size:11px;opacity:.6">(${vehicles.length})</span></div>
       <div class="tab" data-tab="history">Historik <span style="font-size:11px;opacity:.6">(${orders.length})</span></div>
+      <div class="tab" data-tab="sales">Affärer</div>
     </div>
 
     <div id="tab-info">
@@ -191,6 +193,8 @@ export async function renderCustomerDetail(el, id) {
       </div>
     </div>
 
+    <div id="tab-sales" class="hidden"><div class="loading">Laddar…</div></div>
+
     <div id="tab-history" class="hidden">
       <div class="card">
         <div class="card-header"><span class="card-title">Arbetsorder-historik</span></div>
@@ -215,14 +219,20 @@ export async function renderCustomerDetail(el, id) {
   `;
 
   // Tab switching
+  let salesLoaded = false;
   document.getElementById('customer-tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('.tab');
     if (!tab) return;
     document.querySelectorAll('#customer-tabs .tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    ['info', 'contacts', 'vehicles', 'history'].forEach(name => {
+    ['info', 'contacts', 'vehicles', 'history', 'sales'].forEach(name => {
       document.getElementById(`tab-${name}`).classList.toggle('hidden', name !== tab.dataset.tab);
     });
+    // Affärerna hämtas först när fliken öppnas – kundkortet ska inte vänta på dem
+    if (tab.dataset.tab === 'sales' && !salesLoaded) {
+      salesLoaded = true;
+      renderCustomerSales(document.getElementById('tab-sales'), id);
+    }
   });
 
   // Contacts tab actions

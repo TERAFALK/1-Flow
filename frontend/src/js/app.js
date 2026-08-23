@@ -11,9 +11,20 @@ import { renderCalendar } from './pages/calendar.js';
 import { renderUsers } from './pages/users.js';
 import { renderSettings } from './pages/settings.js';
 import { renderPickLists } from './pages/pick-lists.js';
+import { renderSales, renderSalesLeadDetail, renderSalesOrderDetail } from './pages/sales.js';
 
-console.log('Flow app.js loaded', new Date().toISOString());
+// index.html laddar den här filen som app.js?v=N för cachebrytning, medan
+// sidmodulerna importerar '../app.js' för fmtDate/statusBadge. Det är två olika
+// URL:er och därmed två modulinstanser av samma fil. Utan spärren nedan
+// registreras varje lyssnare dubbelt – två route() kör då samtidigt vid varje
+// navigering och skriver över varandras DOM, vilket ger sporadiska fel av typen
+// "Cannot set properties of null" i sidor som slår upp element efter ett await.
+const isPrimaryInstance = !window.__flowAppBooted;
+window.__flowAppBooted = true;
 
+if (isPrimaryInstance) console.log('Flow app.js loaded', new Date().toISOString());
+
+if (isPrimaryInstance) {
 window.addEventListener('error', (e) => {
   console.error('Ohanterat fel:', e.error || e.message);
   showToast(`Fel: ${e.error?.message || e.message}`, 'error');
@@ -26,6 +37,7 @@ document.addEventListener('securitypolicyviolation', (e) => {
   console.error('CSP-blockering:', e.violatedDirective, e.blockedURI, e.sourceFile, e.lineNumber);
   showToast(`CSP blockerar: ${e.violatedDirective}`, 'error');
 });
+}
 
 // ── Helpers (exported for page modules) ──────────────────────────────────────
 
@@ -68,6 +80,8 @@ const PAGE_TITLES = {
   '/scanner':      'Scanner',
   '/articles':     'Artiklar',
   '/pick-lists':   'Plocklistor',
+  '/sales':        'Försäljning',
+  '/sales-orders': 'Försäljning',
   '/time-entries': 'Tidrapportering',
   '/calendar':     'Kalender',
   '/users':        'Användare',
@@ -120,6 +134,8 @@ async function route() {
       if (base === '/work-orders') return await renderWorkOrderDetail(content, parseInt(id));
       if (base === '/customers')   return await renderCustomerDetail(content, parseInt(id));
       if (base === '/vehicles')    return await renderVehicleDetail(content, parseInt(id));
+      if (base === '/sales')        return await renderSalesLeadDetail(content, parseInt(id));
+      if (base === '/sales-orders') return await renderSalesOrderDetail(content, parseInt(id));
     }
 
     if (path === '/work-orders/new') return await renderNewWorkOrder(content, params);
@@ -133,6 +149,7 @@ async function route() {
       '/vehicles':      renderVehicles,
       '/articles':      renderArticles,
       '/pick-lists':    renderPickLists,
+      '/sales':         renderSales,
       '/scanner':       renderScanner,
       '/time-entries':  renderTimeEntries,
       '/calendar':      renderCalendar,
@@ -243,7 +260,7 @@ function landingRoute(user) {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', async () => {
+if (isPrimaryInstance) document.addEventListener('DOMContentLoaded', async () => {
   // Technician login (dropdown + password)
   document.getElementById('login-form-tech').addEventListener('submit', async (e) => {
     e.preventDefault();

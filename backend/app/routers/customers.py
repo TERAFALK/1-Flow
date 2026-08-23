@@ -77,5 +77,9 @@ def delete_customer(
         raise HTTPException(status_code=400, detail="Kunden har arbetsordrar – ta bort dem först")
     if customer.vehicles:
         raise HTTPException(status_code=400, detail="Kunden har fordon – ta bort dem först")
+    if customer.sales_leads:
+        raise HTTPException(status_code=400, detail="Kunden har offertförfrågningar – ta bort dem först")
+    if customer.sales_orders:
+        raise HTTPException(status_code=400, detail="Kunden har sålda ordrar – ta bort dem först")
     db.delete(customer)
     db.commit()

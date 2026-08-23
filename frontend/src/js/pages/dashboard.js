@@ -3,7 +3,12 @@ import { statusBadge, fmtDate } from '../app.js';
 
 export async function renderDashboard(el) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
-  const data = await api.get('/dashboard');
+  // Säljstatistiken är admin-only och egen endpoint – ett fel där ska inte
+  // släcka hela översikten, så den faller tillbaka på null
+  const [data, sales] = await Promise.all([
+    api.get('/dashboard'),
+    api.get('/sales/leads/stats').catch(() => null),
+  ]);
 
   // Topbar action
   const topbarActions = document.getElementById('topbar-actions');
@@ -45,6 +50,17 @@ export async function renderDashboard(el) {
         <div class="stat-value">${readyToInvoice}</div>
         <div class="stat-sub">Väntar på fakturering</div>
       </div>
+      ${sales ? `
+      <div class="stat-card">
+        <div class="stat-label">Öppna förfrågningar</div>
+        <div class="stat-value">${sales.open_leads}</div>
+        <div class="stat-sub"><a href="#/sales" style="color:var(--accent)">Till Försäljning</a></div>
+      </div>
+      <div class="stat-card${sales.overdue_followups ? ' accent' : ''}">
+        <div class="stat-label">Uppföljning passerad</div>
+        <div class="stat-value">${sales.overdue_followups}</div>
+        <div class="stat-sub">Förfrågningar som väntar på dig</div>
+      </div>` : ''}
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start">

@@ -1,8 +1,9 @@
 from datetime import datetime
 from enum import Enum as PyEnum
 from sqlalchemy import (
-    Column, Integer, String, DateTime, ForeignKey,
-    Numeric, Text, Boolean, Enum, BigInteger, Float, JSON
+    Column, Integer, String, DateTime, Date, ForeignKey,
+    Numeric, Text, Boolean, Enum, BigInteger, Float, JSON,
+    UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -91,6 +92,9 @@ class Customer(Base):
     vehicles = relationship("Vehicle", back_populates="customer")
     work_orders = relationship("WorkOrder", back_populates="customer")
     contacts = relationship("ContactPerson", back_populates="customer", cascade="all, delete-orphan")
+    # Ingen delete-cascade: en kund med affärer ska inte gå att radera (se customers.py)
+    sales_leads = relationship("SalesLead", back_populates="customer")
+    sales_orders = relationship("SalesOrder", back_populates="customer")
 
 
 class ContactPerson(Base):
@@ -407,3 +411,174 @@ class PickListLine(Base):
 
     pick_list = relationship("PickList", back_populates="lines")
     article = relationship("Article")
+
+
+# ── Försäljning / CRM ─────────────────────────────────────────────────────────
+# Ersätter kundens Excel-fil "Arbetande offerter FFB SBT, försäljning.xlsx" som
+# innehåller två processer: offertförfrågningar (SalesLead) och uppföljning av
+# sålda affärer med ~30 milstolpar per order (SalesOrder + SalesOrderMilestone).
+
+
+class SalesLeadStatus(str, PyEnum):
+    # OBS: SQLAlchemy lagrar medlemmens NAMN i Postgres-enumen `salesleadstatus`,
+    # så nya medlemmar kräver ALTER TYPE-migration i main.py. Namnen hålls ASCII
+    # (sald) – etiketten "Såld" sätts i frontend.
+    ny = "ny"
+    skickad = "skickad"
+    jobbar = "jobbar"
+    sald = "sald"
+    avslutad = "avslutad"
+
+
+class SalesNoteKind(str, PyEnum):
+    samtal = "samtal"
+    mail = "mail"
+    mote = "mote"
+    anteckning = "anteckning"
+
+
+class MilestoneValueType(str, PyEnum):
+    datum = "datum"
+    text = "text"
+    ja_nej = "ja_nej"
+
+
+class SalesLead(Base):
+    """En offertförfrågan – motsvarar en rad i Excel-fliken "Offertförfrågan Lista"."""
+    __tablename__ = "sales_leads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    activity_number = Column(String, index=True)          # Aktivitet (HubSpot-nr)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    contact_person_id = Column(Integer, ForeignKey("contact_persons.id"))
+    product_type = Column(String)                         # Objekt – KIA/AUF/HEUT/...
+    size = Column(String)                                 # Storlek – t.ex. 45,3
+    quantity = Column(Integer, default=1)
+    status = Column(Enum(SalesLeadStatus), default=SalesLeadStatus.ny, nullable=False, index=True)
+
+    date_request = Column(Date)                           # Datum Förfrågan
+    date_sent_ffb = Column(Date)                          # Datum skickat FFB
+    date_back_ffb = Column(Date)                          # Datum tillbaka FFB
+    date_sent_customer = Column(Date)                     # Datum skickat kund
+
+    quote_number = Column(String, index=True)             # offert nr, t.ex. N11068496
+    estimated_value = Column(Numeric(12, 2))
+    currency = Column(String, default="EUR")
+    next_followup_date = Column(Date, index=True)
+    assigned_to = Column(Integer, ForeignKey("users.id"))
+    external_link = Column(String)                        # Offert Länk – gammal UNC-sökväg
+    lost_reason = Column(String)
+    notes = Column(Text)
+
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    customer = relationship("Customer", back_populates="sales_leads")
+    contact_person = relationship("ContactPerson")
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    creator = relationship("User", foreign_keys=[created_by])
+    lead_notes = relationship(
+        "SalesLeadNote", back_populates="lead",
+        cascade="all, delete-orphan", order_by="SalesLeadNote.note_date.desc()",
+    )
+    files = relationship("SalesLeadFile", back_populates="lead", cascade="all, delete-orphan")
+
+
+class SalesLeadNote(Base):
+    """En post i uppföljningsloggen. I Excel låg allt detta hopklistrat i en cell."""
+    __tablename__ = "sales_lead_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"), nullable=False)
+    note_date = Column(Date, nullable=False)
+    kind = Column(Enum(SalesNoteKind), default=SalesNoteKind.anteckning, nullable=False)
+    body = Column(Text, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lead = relationship("SalesLead", back_populates="lead_notes")
+    creator = relationship("User")
+
+
+class SalesLeadFile(Base):
+    """Offert-PDF och annat underlag. Speglar WorkOrderFile men mot förfrågningar."""
+    __tablename__ = "sales_lead_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"), nullable=False)
+    filename = Column(String, nullable=False)             # uuid-namnet på disk
+    original_name = Column(String, nullable=False)
+    mime_type = Column(String)
+    size_bytes = Column(BigInteger)
+    uploaded_by = Column(Integer, ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    lead = relationship("SalesLead", back_populates="files")
+    uploader = relationship("User")
+
+
+class SalesOrder(Base):
+    """En såld affär – motsvarar en rad i Excel-årsflikarna. Året härleds ur sold_date."""
+    __tablename__ = "sales_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"))
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    order_number = Column(String, index=True)             # order – N071010
+    serial_number = Column(String)                        # tillverkningsnr / VIN
+    product_type = Column(String)                         # typ – KIA28
+    price = Column(Numeric(12, 2))
+    currency = Column(String, default="EUR")
+    commission = Column(Numeric(12, 2))                   # provision
+    commission_paid_date = Column(Date)                   # utbet
+    sold_date = Column(Date, index=True)                  # datum såld
+    delivery_date = Column(Date)                          # lev kund
+    planned_delivery = Column(Date)                       # pl lev
+    delivery_week = Column(String)                        # v
+    registration_number = Column(String)                  # reg nr
+    weight_kg = Column(Integer)                           # vikt
+    visit_ffb = Column(Boolean, default=False)            # besök
+    sort_index = Column(Integer)                          # löpnumret i kolumn A
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    customer = relationship("Customer", back_populates="sales_orders")
+    lead = relationship("SalesLead")
+    milestones = relationship(
+        "SalesOrderMilestone", back_populates="order", cascade="all, delete-orphan"
+    )
+
+
+class SalesMilestoneDef(Base):
+    """Mallen för milstolparna. Kolumnuppsättningen i Excel har ändrats varje år
+    (10 st 2013, 50 st 2018), därför är stegen data och inte kolumner."""
+    __tablename__ = "sales_milestone_defs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, nullable=False)
+    group_label = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    value_type = Column(Enum(MilestoneValueType), default=MilestoneValueType.datum, nullable=False)
+    sort_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
+
+class SalesOrderMilestone(Base):
+    """Ifyllt värde för en milstolpe. value_text finns eftersom flera Excel-celler
+    innehåller fritext ("x", "NB001 NB002", "Finns ej enl FFB") och inte datum."""
+    __tablename__ = "sales_order_milestones"
+    __table_args__ = (UniqueConstraint("order_id", "def_id", name="uq_order_milestone"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("sales_orders.id"), nullable=False)
+    def_id = Column(Integer, ForeignKey("sales_milestone_defs.id"), nullable=False)
+    value_date = Column(Date)
+    value_text = Column(String)
+    completed = Column(Boolean, default=False)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    order = relationship("SalesOrder", back_populates="milestones")
+    definition = relationship("SalesMilestoneDef")

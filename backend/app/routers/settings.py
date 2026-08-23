@@ -12,6 +12,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 DEFAULTS = {
     "order_number_mode": "auto",
     "purchase_number_mode": "auto",
+    # Objekttyperna i offertförfrågningarna – fliken "Data" i kundens Excel
+    "sales_product_types": "KIA,AUF,KIH,EUT,HEUT,SAB,TSA,KIZH",
 }
 
 

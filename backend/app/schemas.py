@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 from .models import (
     UserRole, WorkOrderStatus, TimeEntryType, StockTransactionType,
     PurchaseStatus, FileType, ActivityType,
+    SalesLeadStatus, SalesNoteKind, MilestoneValueType,
 )
 
 
@@ -672,6 +673,240 @@ class PickListScanResult(BaseModel):
     article_name: str
     line: PickListLineOut
     unknown: bool = False
+
+# ── Försäljning / CRM ─────────────────────────────────────────────────────────
+
+class SalesLeadNoteCreate(BaseModel):
+    body: str
+    kind: SalesNoteKind = SalesNoteKind.anteckning
+    note_date: Optional[date] = None
+
+
+class SalesLeadNoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    note_date: date
+    kind: SalesNoteKind
+    body: str
+    created_at: datetime
+    created_by_name: Optional[str] = None
+
+
+class SalesLeadFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    original_name: str
+    mime_type: Optional[str]
+    size_bytes: Optional[int]
+    uploaded_at: datetime
+
+
+class SalesLeadCreate(BaseModel):
+    customer_id: int
+    activity_number: Optional[str] = None
+    contact_person_id: Optional[int] = None
+    product_type: Optional[str] = None
+    size: Optional[str] = None
+    quantity: int = 1
+    status: SalesLeadStatus = SalesLeadStatus.ny
+    date_request: Optional[date] = None
+    date_sent_ffb: Optional[date] = None
+    date_back_ffb: Optional[date] = None
+    date_sent_customer: Optional[date] = None
+    quote_number: Optional[str] = None
+    estimated_value: Optional[Decimal] = None
+    currency: str = "EUR"
+    next_followup_date: Optional[date] = None
+    assigned_to: Optional[int] = None
+    external_link: Optional[str] = None
+    lost_reason: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SalesLeadUpdate(SalesLeadCreate):
+    # Alla fält valfria vid uppdatering – samma grepp som CustomerUpdate
+    customer_id: Optional[int] = None
+    quantity: Optional[int] = None
+    status: Optional[SalesLeadStatus] = None
+    currency: Optional[str] = None
+
+
+class SalesLeadListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    activity_number: Optional[str]
+    customer_id: int
+    customer_name: str = ""
+    product_type: Optional[str]
+    size: Optional[str]
+    quantity: Optional[int]
+    status: SalesLeadStatus
+    date_request: Optional[date]
+    date_sent_ffb: Optional[date]
+    date_back_ffb: Optional[date]
+    date_sent_customer: Optional[date]
+    quote_number: Optional[str]
+    estimated_value: Optional[Decimal]
+    currency: Optional[str]
+    next_followup_date: Optional[date]
+    assignee_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    last_note: Optional[str] = None
+    last_note_date: Optional[date] = None
+    note_count: int = 0
+    file_count: int = 0
+    order_id: Optional[int] = None
+
+
+class SalesLeadOut(SalesLeadListItem):
+    contact_person_id: Optional[int] = None
+    external_link: Optional[str] = None
+    lost_reason: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    lead_notes: List[SalesLeadNoteOut] = []
+    files: List[SalesLeadFileOut] = []
+
+
+class SalesLeadConvert(BaseModel):
+    """Fälten som fylls i när en förfrågan blir en order."""
+    order_number: Optional[str] = None
+    sold_date: Optional[date] = None
+    price: Optional[Decimal] = None
+    commission: Optional[Decimal] = None
+
+
+class SalesMilestoneDefCreate(BaseModel):
+    key: str
+    group_label: str
+    label: str
+    value_type: MilestoneValueType = MilestoneValueType.datum
+    sort_order: int = 0
+
+
+class SalesMilestoneDefUpdate(BaseModel):
+    group_label: Optional[str] = None
+    label: Optional[str] = None
+    value_type: Optional[MilestoneValueType] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class SalesMilestoneDefOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    key: str
+    group_label: str
+    label: str
+    value_type: MilestoneValueType
+    sort_order: int
+    is_active: bool
+
+
+class SalesOrderMilestoneUpdate(BaseModel):
+    value_date: Optional[date] = None
+    value_text: Optional[str] = None
+    completed: Optional[bool] = None
+
+
+class SalesOrderMilestoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    def_id: int
+    key: str
+    group_label: str
+    label: str
+    value_type: MilestoneValueType
+    sort_order: int
+    value_date: Optional[date] = None
+    value_text: Optional[str] = None
+    completed: bool = False
+    updated_at: Optional[datetime] = None
+
+
+class SalesOrderCreate(BaseModel):
+    customer_id: int
+    lead_id: Optional[int] = None
+    order_number: Optional[str] = None
+    serial_number: Optional[str] = None
+    product_type: Optional[str] = None
+    price: Optional[Decimal] = None
+    currency: str = "EUR"
+    commission: Optional[Decimal] = None
+    commission_paid_date: Optional[date] = None
+    sold_date: Optional[date] = None
+    delivery_date: Optional[date] = None
+    planned_delivery: Optional[date] = None
+    delivery_week: Optional[str] = None
+    registration_number: Optional[str] = None
+    weight_kg: Optional[int] = None
+    visit_ffb: Optional[bool] = None
+    sort_index: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class SalesOrderUpdate(SalesOrderCreate):
+    customer_id: Optional[int] = None
+    currency: Optional[str] = None
+
+
+class SalesOrderListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    lead_id: Optional[int]
+    customer_id: int
+    customer_name: str = ""
+    order_number: Optional[str]
+    serial_number: Optional[str]
+    product_type: Optional[str]
+    price: Optional[Decimal]
+    currency: Optional[str]
+    commission: Optional[Decimal]
+    commission_paid_date: Optional[date]
+    sold_date: Optional[date]
+    delivery_date: Optional[date]
+    planned_delivery: Optional[date]
+    delivery_week: Optional[str]
+    registration_number: Optional[str]
+    weight_kg: Optional[int]
+    visit_ffb: Optional[bool]
+    sort_index: Optional[int]
+    milestones_done: int = 0
+    milestones_total: int = 0
+
+
+class SalesOrderOut(SalesOrderListItem):
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    milestones: List[SalesOrderMilestoneOut] = []
+
+
+class SalesCommissionRow(BaseModel):
+    order_id: int
+    order_number: Optional[str]
+    customer_name: str
+    product_type: Optional[str]
+    sold_date: Optional[date]
+    price: Optional[Decimal]
+    commission: Optional[Decimal]
+    commission_paid_date: Optional[date]
+
+
+class SalesCommissionSummary(BaseModel):
+    year: Optional[int]
+    rows: List[SalesCommissionRow]
+    total_price: Decimal = Decimal("0")
+    total_commission: Decimal = Decimal("0")
+    paid_commission: Decimal = Decimal("0")
+    unpaid_commission: Decimal = Decimal("0")
+
+
+class SalesPipelineStats(BaseModel):
+    by_status: dict
+    open_leads: int = 0
+    overdue_followups: int = 0
+    open_value: Decimal = Decimal("0")
 
 
 Token.model_rebuild()

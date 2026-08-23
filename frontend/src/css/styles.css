@@ -1119,3 +1119,146 @@ tbody tr.clickable { cursor: pointer; }
 
 /* ── Task item padding inside card ──────────────────────────────────────────── */
 .card-body .task-item { padding: 12px 16px; }
+
+/* ── Försäljning / CRM ───────────────────────────────────────────────────────── */
+
+/* Statusbadges – egna namn så de inte krockar med arbetsorderns badge-ny m.fl. */
+.badge-sales-ny       { background: var(--border);        color: var(--text-2); }
+.badge-sales-skickad  { background: var(--info-light);    color: var(--info); }
+.badge-sales-jobbar   { background: var(--warning-light); color: var(--warning); }
+.badge-sales-sald     { background: var(--success-light); color: var(--success); }
+.badge-sales-avslutad { background: var(--accent-light);  color: var(--accent); }
+
+.badge-note-samtal     { background: var(--info-light);    color: var(--info); }
+.badge-note-mail       { background: var(--purple-light);  color: var(--purple); }
+.badge-note-mote       { background: var(--warning-light); color: var(--warning); }
+.badge-note-anteckning { background: var(--border);        color: var(--text-2); }
+
+/* Nyckeltalsrad ovanför pipelinen */
+.sales-stats {
+  display: flex; flex-wrap: wrap; gap: 28px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border-light);
+}
+.sales-stat { display: flex; flex-direction: column; gap: 2px; }
+.sales-stat span   { font-size: 11px; font-weight: 700; color: var(--text-3);
+                     text-transform: uppercase; letter-spacing: .7px; }
+.sales-stat strong { font-size: 19px; font-weight: 700; }
+
+/* Kanban-tavlan */
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(210px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.kanban-col {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; flex-direction: column;
+  min-height: 220px;
+}
+.kanban-col.drag-over { border-color: var(--accent); background: var(--accent-light); }
+.kanban-col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  font-size: 11.5px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .7px;
+  border-bottom: 1px solid var(--border);
+}
+.kanban-count {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 1px 8px; font-size: 11px;
+}
+.kanban-col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.kanban-empty { text-align: center; color: var(--text-3); font-size: 13px; padding: 12px 0; }
+
+.lead-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .1s, transform .1s;
+}
+.lead-card:hover  { box-shadow: var(--shadow); transform: translateY(-1px); }
+.lead-card.dragging { opacity: .4; }
+.lead-card-top { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.lead-card-obj  { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+.lead-card-meta {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  font-size: 11.5px; color: var(--text-3); margin-top: 6px;
+}
+.lead-card-note {
+  font-size: 12px; color: var(--text-2);
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+}
+.lead-card-followup { font-size: 11.5px; color: var(--text-3); margin-top: 6px; }
+.lead-card-followup.overdue { color: var(--accent); font-weight: 600; }
+.lead-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); margin-left: auto; flex: none;
+}
+
+/* Detaljvy förfrågan */
+.sales-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .sales-detail { grid-template-columns: 1fr; } }
+
+.step-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; font-size: 13.5px;
+  border-bottom: 1px solid var(--border-light);
+}
+.step-row:last-child { border-bottom: none; }
+.step-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  background: var(--border); border: 2px solid var(--border);
+}
+.step-row.done .step-dot { background: var(--success); border-color: var(--success); }
+.step-row .step-label { flex: 1; color: var(--text-2); }
+.step-row.done .step-label { color: var(--text); font-weight: 600; }
+.step-date { color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* Uppföljningslogg */
+.timeline { display: flex; flex-direction: column; gap: 14px; }
+.timeline-item { border-left: 2px solid var(--border); padding-left: 12px; }
+.timeline-head { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+.timeline-body { font-size: 13.5px; white-space: pre-wrap; }
+
+/* Milstolpar */
+.milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.ms-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0;
+}
+.ms-row .ms-label { flex: 1; font-size: 13px; color: var(--text-2); }
+.ms-row.done .ms-label { color: var(--text); font-weight: 600; }
+.ms-row input[type="date"], .ms-row input[type="text"] { width: 150px; }
+
+.ms-progress {
+  position: relative;
+  height: 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+}
+.ms-progress-bar { height: 100%; background: var(--success); opacity: .35; }
+.ms-progress-label {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--text-2);
+}
+
+.order-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 24px; }
+.order-meta hr { grid-column: 1 / -1; }
+.order-meta p  { grid-column: 1 / -1; }

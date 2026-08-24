@@ -305,6 +305,27 @@ def _run_migrations():
              AND NULLIF(btrim(m.value_text), '') IS NOT NULL
              AND NOT EXISTS (SELECT 1 FROM sales_order_aocs a WHERE a.order_id = m.order_id)
            GROUP BY m.order_id""",
+        # Uppföljningen ska fortsätta efter att affären gått igenom, så en
+        # anteckning kan nu hänga på en order istället för en förfrågan.
+        "ALTER TABLE sales_lead_notes ADD COLUMN IF NOT EXISTS order_id INTEGER REFERENCES sales_orders(id) ON DELETE CASCADE",
+        "ALTER TABLE sales_lead_notes ALTER COLUMN lead_id DROP NOT NULL",
+        # Avslutade ordrar arkiveras istället för att raderas
+        "ALTER TABLE sales_orders ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP",
+        "CREATE INDEX IF NOT EXISTS ix_sales_orders_archived_at ON sales_orders (archived_at)",
+        # Egna aktiviteter i Gantt-schemat, på förfrågan eller order
+        """CREATE TABLE IF NOT EXISTS sales_activities (
+            id SERIAL PRIMARY KEY,
+            lead_id INTEGER REFERENCES sales_leads(id) ON DELETE CASCADE,
+            order_id INTEGER REFERENCES sales_orders(id) ON DELETE CASCADE,
+            name VARCHAR NOT NULL,
+            color VARCHAR DEFAULT '#E2001A',
+            start_date DATE,
+            end_date DATE,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_sales_activities_lead ON sales_activities (lead_id)",
+        "CREATE INDEX IF NOT EXISTS ix_sales_activities_order ON sales_activities (order_id)",
     ]
     with engine.connect() as conn:
         for stmt in stmts:

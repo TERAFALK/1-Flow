@@ -676,6 +676,56 @@ class PickListScanResult(BaseModel):
 
 # ── Försäljning / CRM ─────────────────────────────────────────────────────────
 
+class SalesContactBlock(BaseModel):
+    """Kunduppgifterna som visas likadant på förfrågan och på såld order."""
+    customer_id: int
+    customer_name: str = ""
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_org_number: Optional[str] = None
+    customer_city: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
+
+
+class SalesActivityCreate(BaseModel):
+    name: str
+    color: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    sort_order: Optional[int] = None
+
+
+class SalesActivityUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    sort_order: Optional[int] = None
+
+
+class SalesActivityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    color: Optional[str]
+    start_date: Optional[date]
+    end_date: Optional[date]
+    sort_order: Optional[int]
+
+
+class SalesScheduleItem(BaseModel):
+    """En rad i Gantt-schemat. `source` skiljer automatiska poster (som kommer ur
+    datumfälten) från egna aktiviteter, som är de enda som går att redigera."""
+    name: str
+    color: str = "#E2001A"
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    source: str = "auto"          # 'auto' | 'custom'
+    activity_id: Optional[int] = None
+
+
 class SalesLeadNoteCreate(BaseModel):
     body: str
     kind: SalesNoteKind = SalesNoteKind.anteckning
@@ -690,6 +740,8 @@ class SalesLeadNoteOut(BaseModel):
     body: str
     created_at: datetime
     created_by_name: Optional[str] = None
+    # Ordervyn visar även förfrågans logg – då är den historik och inte redigerbar
+    from_lead: bool = False
 
 
 class SalesLeadFileOut(BaseModel):
@@ -751,11 +803,17 @@ class SalesLeadListItem(BaseModel):
     next_followup_date: Optional[date]
     assignee_name: Optional[str] = None
     contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_org_number: Optional[str] = None
+    contact_name: Optional[str] = None
     last_note: Optional[str] = None
     last_note_date: Optional[date] = None
     note_count: int = 0
     file_count: int = 0
     order_id: Optional[int] = None
+    order_number: Optional[str] = None
 
 
 class SalesLeadOut(SalesLeadListItem):
@@ -767,6 +825,7 @@ class SalesLeadOut(SalesLeadListItem):
     updated_at: Optional[datetime] = None
     lead_notes: List[SalesLeadNoteOut] = []
     files: List[SalesLeadFileOut] = []
+    activities: List[SalesActivityOut] = []
 
 
 class SalesLeadConvert(BaseModel):
@@ -907,6 +966,13 @@ class SalesOrderListItem(BaseModel):
     weight_kg: Optional[int]
     visit_ffb: Optional[bool]
     sort_index: Optional[int]
+    archived_at: Optional[datetime] = None
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_org_number: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
     milestones_done: int = 0
     milestones_total: int = 0
 
@@ -918,6 +984,8 @@ class SalesOrderOut(SalesOrderListItem):
     milestones: List[SalesOrderMilestoneOut] = []
     aocs: List[SalesOrderAocOut] = []
     files: List[SalesOrderFileOut] = []
+    order_notes: List[SalesLeadNoteOut] = []
+    activities: List[SalesActivityOut] = []
 
 
 class SalesCommissionRow(BaseModel):

@@ -483,14 +483,23 @@ class SalesLead(Base):
         cascade="all, delete-orphan", order_by="SalesLeadNote.note_date.desc()",
     )
     files = relationship("SalesLeadFile", back_populates="lead", cascade="all, delete-orphan")
+    activities = relationship(
+        "SalesActivity", back_populates="lead", cascade="all, delete-orphan",
+        order_by="SalesActivity.sort_order",
+    )
 
 
 class SalesLeadNote(Base):
-    """En post i uppföljningsloggen. I Excel låg allt detta hopklistrat i en cell."""
+    """En post i uppföljningsloggen. I Excel låg allt detta hopklistrat i en cell.
+
+    Hänger på antingen en förfrågan eller en såld order – uppföljningen ska kunna
+    fortsätta efter att affären gått igenom. Tabellnamnet är kvar från när bara
+    förfrågningar hade logg."""
     __tablename__ = "sales_lead_notes"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(Integer, ForeignKey("sales_leads.id"), nullable=False)
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"))
+    order_id = Column(Integer, ForeignKey("sales_orders.id"))
     note_date = Column(Date, nullable=False)
     kind = Column(Enum(SalesNoteKind), default=SalesNoteKind.anteckning, nullable=False)
     body = Column(Text, nullable=False)
@@ -498,7 +507,27 @@ class SalesLeadNote(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     lead = relationship("SalesLead", back_populates="lead_notes")
+    order = relationship("SalesOrder", back_populates="order_notes")
     creator = relationship("User")
+
+
+class SalesActivity(Base):
+    """Egen aktivitet i Gantt-schemat, på en förfrågan eller en order. Speglar
+    WorkOrderPhase men med rena datum – säljprocessen räknas i dagar, inte timmar."""
+    __tablename__ = "sales_activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"))
+    order_id = Column(Integer, ForeignKey("sales_orders.id"))
+    name = Column(String, nullable=False)
+    color = Column(String, default="#E2001A")
+    start_date = Column(Date)
+    end_date = Column(Date)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lead = relationship("SalesLead", back_populates="activities")
+    order = relationship("SalesOrder", back_populates="activities")
 
 
 class SalesLeadFile(Base):
@@ -541,6 +570,8 @@ class SalesOrder(Base):
     visit_ffb = Column(Boolean, default=False)            # besök
     sort_index = Column(Integer)                          # löpnumret i kolumn A
     notes = Column(Text)
+    # Avslutade ordrar arkiveras istället för att raderas – de behövs i provisionen
+    archived_at = Column(DateTime, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -555,6 +586,14 @@ class SalesOrder(Base):
     )
     files = relationship(
         "SalesOrderFile", back_populates="order", cascade="all, delete-orphan"
+    )
+    order_notes = relationship(
+        "SalesLeadNote", back_populates="order", cascade="all, delete-orphan",
+        order_by="SalesLeadNote.note_date.desc()",
+    )
+    activities = relationship(
+        "SalesActivity", back_populates="order", cascade="all, delete-orphan",
+        order_by="SalesActivity.sort_order",
     )
 
 

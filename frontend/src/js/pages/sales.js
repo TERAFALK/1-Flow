@@ -1,7 +1,8 @@
-import { api, uploadFile, downloadFile } from '../api.js';
+import { api, uploadFile, downloadFile, printFile } from '../api.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { openCustomerForm } from './customers.js';
+import { renderGantt } from '../components/gantt.js';
 
 // ── Gemensamma hjälpare ───────────────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ export async function renderSales(el, params = {}) {
       <div class="tab ${view === 'pipeline' ? 'active' : ''}" data-view="pipeline">Förfrågningar</div>
       <div class="tab ${view === 'orders' ? 'active' : ''}" data-view="orders">Sålda ordrar</div>
       <div class="tab ${view === 'commission' ? 'active' : ''}" data-view="commission">Provision</div>
+      <div class="tab ${view === 'archive' ? 'active' : ''}" data-view="archive">Arkiv</div>
     </div>
 
     <div id="sales-view"><div class="loading">Laddar…</div></div>
@@ -115,6 +117,7 @@ export async function renderSales(el, params = {}) {
   if (!host) return;
   if (view === 'orders') return renderOrdersView(host);
   if (view === 'commission') return renderCommissionView(host);
+  if (view === 'archive') return renderOrdersView(host, { archived: true });
   return renderPipelineView(host);
 }
 
@@ -216,6 +219,7 @@ function leadCard(lead) {
       <div class="lead-card-meta">
         ${lead.activity_number ? `<span>#${esc(lead.activity_number)}</span>` : ''}
         ${lead.date_request ? `<span>${fmtD(lead.date_request)}</span>` : ''}
+        ${lead.contact_phone ? `<span>${esc(lead.contact_phone)}</span>` : ''}
         ${lead.estimated_value ? `<span>${fmtMoney(lead.estimated_value, lead.currency)}</span>` : ''}
       </div>
       ${lead.last_note ? `<div class="lead-card-note">${fmtD(lead.last_note_date)} · ${esc(lead.last_note).slice(0, 90)}</div>` : ''}
@@ -291,7 +295,7 @@ function tableHtml(leads) {
           <thead><tr>
             <th>Aktivitet</th><th>Kund</th><th>Objekt</th><th>Storlek</th>
             <th>Förfrågan</th><th>Till FFB</th><th>Från FFB</th><th>Till kund</th>
-            <th>Status</th><th>Uppföljning</th><th>E-post</th><th>Filer</th>
+            <th>Status</th><th>Uppföljning</th><th>Telefon</th><th>E-post</th><th>Filer</th>
           </tr></thead>
           <tbody>
             ${leads.map(l => `
@@ -309,6 +313,7 @@ function tableHtml(leads) {
                   ${l.next_followup_date ? `<div>${fmtD(l.next_followup_date)}</div>` : ''}
                   ${l.last_note ? `<div style="font-size:12px">${esc(l.last_note).slice(0, 70)}</div>` : ''}
                 </td>
+                <td class="text-muted">${esc(l.contact_phone) || '–'}</td>
                 <td class="text-muted">${esc(l.contact_email) || '–'}</td>
                 <td class="text-muted">${l.file_count || 0}</td>
               </tr>`).join('')}
@@ -320,9 +325,11 @@ function tableHtml(leads) {
 
 // ── Vy 2: sålda ordrar ────────────────────────────────────────────────────────
 
-async function renderOrdersView(host) {
-  const years = await api.get('/sales/orders/years');
-  let year = years[0] || new Date().getFullYear();
+async function renderOrdersView(host, { archived = false } = {}) {
+  const years = await api.get(`/sales/orders/years?archived=${archived}`);
+  // Utan årtal ska väljaren stå på "Alla år" och filtret vara tomt – annars visar
+  // rubriken ett år som listan i själva verket inte filtrerar på
+  let year = years[0] || '';
   let query = '';
 
   host.innerHTML = `
@@ -340,6 +347,11 @@ async function renderOrdersView(host) {
         </div>
       </div>
     </div>
+    ${archived ? `
+      <p class="text-muted" style="font-size:13px;margin:-6px 0 14px">
+        Avslutade ordrar. De räknas fortfarande med i provisionen – öppna en order och välj
+        <strong>Återställ</strong> för att flytta tillbaka den till Sålda ordrar.
+      </p>` : ''}
     <div id="order-body"><div class="loading">Laddar…</div></div>
   `;
 
@@ -359,11 +371,12 @@ async function renderOrdersView(host) {
     const qs = new URLSearchParams();
     if (year) qs.set('year', year);
     if (query) qs.set('q', query);
+    if (archived) qs.set('archived', 'true');
     const orders = await api.get(`/sales/orders${qs.toString() ? `?${qs}` : ''}`);
     const body = document.getElementById('order-body');
     if (!body) return;
     if (!orders.length) {
-      body.innerHTML = `<div class="card"><div class="empty-state"><p>Inga sålda ordrar${year ? ` för ${esc(year)}` : ''}</p></div></div>`;
+      body.innerHTML = `<div class="card"><div class="empty-state"><p>${archived ? 'Arkivet är tomt' : 'Inga sålda ordrar'}${year ? ` för ${esc(year)}` : ''}</p></div></div>`;
       return;
     }
     body.innerHTML = `
@@ -474,10 +487,12 @@ export async function renderSalesLeadDetail(el, id) {
   const topbarActions = document.getElementById('topbar-actions');
   if (topbarActions) topbarActions.innerHTML = `
     <a href="#/sales" class="btn btn-secondary btn-sm">← Tillbaka</a>
+    ${printButtons('lead-pdf')}
     <button class="btn btn-secondary btn-sm" id="edit-lead-btn">Redigera</button>
     ${lead.order_id
       ? `<a href="#/sales-orders/${lead.order_id}" class="btn btn-primary btn-sm">Visa order</a>`
-      : `<button class="btn btn-primary btn-sm" id="convert-btn">Markera som såld</button>`}`;
+      : `<button class="btn btn-primary btn-sm" id="convert-btn">Markera som såld</button>`}
+    <button class="btn-icon" id="delete-lead-btn" title="Ta bort förfrågan">${TRASH_ICON}</button>`;
 
   const objekt = [lead.product_type, lead.size].filter(Boolean).join(' ');
 
@@ -491,21 +506,23 @@ export async function renderSalesLeadDetail(el, id) {
       </div>
     </div>
 
+    <div id="lead-gantt" style="margin-bottom:16px"></div>
+
     <div class="sales-detail">
       <div>
+        ${customerCardHtml(lead)}
+
         <div class="card" style="margin-bottom:16px">
           <div class="card-header"><span class="card-title">Förfrågan</span></div>
           <div class="card-body">
-            ${metaRow('Kund', `<a href="#/customers/${lead.customer_id}" style="color:var(--accent)">${esc(lead.customer_name)}</a>`, true)}
             ${metaRow('Objekt', objekt)}
             ${metaRow('Antal', lead.quantity > 1 ? `${lead.quantity} st` : '')}
-            ${metaRow('E-post', lead.contact_email)}
             ${metaRow('Offertnummer', lead.quote_number)}
             ${metaRow('Uppskattat värde', lead.estimated_value ? fmtMoney(lead.estimated_value, lead.currency) : '')}
             ${metaRow('Ansvarig', lead.assignee_name)}
             ${metaRow('Nästa uppföljning', lead.next_followup_date ? fmtD(lead.next_followup_date) : '')}
             ${metaRow('Avslutsorsak', lead.lost_reason)}
-            ${lead.external_link ? metaRow('Extern länk', esc(lead.external_link)) : ''}
+            ${lead.external_link ? metaRow('Extern länk', lead.external_link) : ''}
             ${lead.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2);white-space:pre-wrap">${esc(lead.notes)}</p>` : ''}
           </div>
         </div>
@@ -533,30 +550,35 @@ export async function renderSalesLeadDetail(el, id) {
       </div>
 
       <div>
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Uppföljning</span>
-            <div class="flex gap-2">
-              <button class="btn btn-secondary btn-sm" data-note-kind="samtal">Ringt</button>
-              <button class="btn btn-secondary btn-sm" data-note-kind="mail">Mailat</button>
-              <button class="btn btn-secondary btn-sm" data-note-kind="mote">Möte</button>
-              <button class="btn btn-primary btn-sm" data-note-kind="anteckning">Anteckning</button>
-            </div>
-          </div>
-          <div class="card-body" id="lead-notes">${notesHtml(lead.lead_notes)}</div>
-        </div>
+        ${notesCardHtml(lead.lead_notes)}
       </div>
     </div>
   `;
 
   const reload = () => renderSalesLeadDetail(el, id);
+  const base = `/sales/leads/${id}`;
 
   document.getElementById('edit-lead-btn')?.addEventListener('click', () => openLeadForm(lead, reload));
   document.getElementById('convert-btn')?.addEventListener('click', () => openConvertForm(lead, reload));
+  bindPrintButtons('lead-pdf', `${base}/pdf`, `forfragan-${id}.pdf`);
 
-  document.querySelectorAll('[data-note-kind]').forEach(btn => {
-    btn.addEventListener('click', () => openNoteForm(id, btn.dataset.noteKind, reload));
+  document.getElementById('delete-lead-btn')?.addEventListener('click', async () => {
+    // Ordern som skapats ur förfrågan tas bort samtidigt – säg det rakt ut
+    const extra = lead.order_id
+      ? ` Även den sålda ordern <strong>${esc(lead.order_number || `#${lead.order_id}`)}</strong>`
+        + ' med dess milstolpar, AOC och filer tas bort.'
+      : '';
+    if (!await confirmDialog(
+      `Ta bort förfrågan för <strong>${esc(lead.customer_name)}</strong>?${extra} Detta kan inte ångras.`
+    )) return;
+    try {
+      await api.delete(base);
+      showToast('Förfrågan borttagen', 'success');
+      location.hash = '#/sales';
+    } catch (err) { showToast(err.message, 'error'); }
   });
+
+  bindNotes(base, reload, { withFollowup: true });
 
   document.getElementById('lead-file-input')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
@@ -564,14 +586,197 @@ export async function renderSalesLeadDetail(el, id) {
     const fd = new FormData();
     fd.append('file', file);
     try {
-      await uploadFile(`/sales/leads/${id}/files`, fd);
+      await uploadFile(`${base}/files`, fd);
       showToast('Fil uppladdad', 'success');
       reload();
     } catch (err) { showToast(err.message, 'error'); }
   });
 
   bindFileActions(id, reload);
-  bindNoteActions(id, reload);
+  loadSchedule(base, 'lead-gantt', reload);
+}
+
+// ── Delat mellan förfrågan och order ──────────────────────────────────────────
+
+const TRASH_ICON = `<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>`;
+
+/** Kunduppgiftsblocket – identiskt på förfrågan och på såld order. */
+function customerCardHtml(obj) {
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><span class="card-title">Kund</span></div>
+      <div class="card-body">
+        ${metaRow('Kund', `<a href="#/customers/${obj.customer_id}" style="color:var(--accent)">${esc(obj.customer_name)}</a>`, true)}
+        ${metaRow('Org.nr', obj.customer_org_number)}
+        ${metaRow('Telefon', obj.customer_phone)}
+        ${metaRow('E-post', obj.customer_email)}
+        ${obj.contact_name ? `
+          <hr class="divider" style="margin:12px 0">
+          ${metaRow('Kontaktperson', obj.contact_name)}
+          ${metaRow('Telefon', obj.contact_phone)}
+          ${metaRow('E-post', obj.contact_email)}` : ''}
+      </div>
+    </div>`;
+}
+
+function printButtons(idPrefix) {
+  return `
+    <button class="btn btn-secondary btn-sm" id="${idPrefix}-print" title="Skriv ut">Skriv ut</button>
+    <button class="btn-icon" id="${idPrefix}-download" title="Ladda ner som PDF">
+      <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
+    </button>`;
+}
+
+function bindPrintButtons(idPrefix, url, filename) {
+  document.getElementById(`${idPrefix}-print`)?.addEventListener('click', async () => {
+    try { await printFile(url); } catch (err) { showToast(err.message, 'error'); }
+  });
+  document.getElementById(`${idPrefix}-download`)?.addEventListener('click', async () => {
+    try { await downloadFile(url, filename); } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+/** Hämtar schemat och ritar Gantt. `base` är t.ex. /sales/leads/3. */
+async function loadSchedule(base, containerId, reload) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let items = [];
+  try {
+    items = await api.get(`${base}/schedule`);
+  } catch (err) {
+    showToast(err.message, 'error');
+    return;
+  }
+  if (!document.getElementById(containerId)) return;
+
+  renderGantt(container, {
+    title: 'Schema',
+    labelHeader: 'Aktivitet',
+    items,
+    // Automatiska poster kommer ur datumfälten och redigeras där de hör hemma;
+    // bara egna aktiviteter går att klicka på.
+    onRowClick: (item) => openActivityForm(base, {
+      id: item.activity_id, name: item.name, color: item.color,
+      start_date: item.start_date, end_date: item.end_date,
+    }, reload),
+    emptyHtml: `
+      <p class="text-muted" style="font-size:13px;margin:0">
+        Inga datum ifyllda än. Datumfälten ritas upp automatiskt, och du kan lägga till
+        egna aktiviteter med knappen ovan.
+      </p>`,
+  });
+
+  // Knappen hakas på kortets rubrik som komponenten just ritade
+  const header = container.querySelector('.card-header .gantt2-tools') || container.querySelector('.card-header');
+  if (header && !header.querySelector('[data-add-activity]')) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary btn-sm';
+    btn.dataset.addActivity = '1';
+    btn.textContent = '+ Aktivitet';
+    btn.addEventListener('click', () => openActivityForm(base, null, reload));
+    header.appendChild(btn);
+  }
+}
+
+const ACTIVITY_COLORS = ['#E2001A', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#64748b'];
+
+function openActivityForm(base, activity, onSaved) {
+  openModal({
+    title: activity?.id ? 'Redigera aktivitet' : 'Ny aktivitet',
+    body: `
+      <form id="activity-form">
+        <div class="field"><label>Namn *</label><input type="text" name="name" value="${esc(activity?.name)}" required autofocus></div>
+        <div class="form-row">
+          <div class="field"><label>Från</label><input type="date" name="start_date" value="${activity?.start_date || ''}"></div>
+          <div class="field"><label>Till</label><input type="date" name="end_date" value="${activity?.end_date || ''}"></div>
+        </div>
+        <div class="field">
+          <label>Färg</label>
+          <div class="color-picker" id="activity-colors">
+            ${ACTIVITY_COLORS.map(c => `
+              <button type="button" class="color-swatch ${(activity?.color || ACTIVITY_COLORS[0]) === c ? 'active' : ''}"
+                      data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+          </div>
+          <input type="hidden" name="color" value="${esc(activity?.color || ACTIVITY_COLORS[0])}">
+        </div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          ${activity?.id ? '<button type="button" class="btn btn-danger" id="activity-delete">Ta bort</button>' : ''}
+          <div style="flex:1"></div>
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">Spara</button>
+        </div>
+      </form>`,
+  });
+
+  const colorInput = document.querySelector('#activity-form [name="color"]');
+  document.getElementById('activity-colors').addEventListener('click', (e) => {
+    const swatch = e.target.closest('[data-color]');
+    if (!swatch) return;
+    document.querySelectorAll('#activity-colors .color-swatch').forEach(s => s.classList.remove('active'));
+    swatch.classList.add('active');
+    colorInput.value = swatch.dataset.color;
+  });
+
+  document.getElementById('activity-delete')?.addEventListener('click', async () => {
+    try {
+      await api.delete(`${base}/activities/${activity.id}`);
+      showToast('Aktivitet borttagen', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('activity-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      name: fd.get('name'),
+      color: fd.get('color'),
+      start_date: fd.get('start_date') || null,
+      end_date: fd.get('end_date') || null,
+    };
+    try {
+      if (activity?.id) await api.put(`${base}/activities/${activity.id}`, body);
+      else await api.post(`${base}/activities`, body);
+      showToast('Aktivitet sparad', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+/** Uppföljningskortet. Fungerar likadant på förfrågan och order – på ordern kan
+ *  listan även innehålla förfrågans logg, som är historik och inte redigerbar. */
+function notesCardHtml(notes) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Uppföljning</span>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" data-note-kind="samtal">Ringt</button>
+          <button class="btn btn-secondary btn-sm" data-note-kind="mail">Mailat</button>
+          <button class="btn btn-secondary btn-sm" data-note-kind="mote">Möte</button>
+          <button class="btn btn-primary btn-sm" data-note-kind="anteckning">Anteckning</button>
+        </div>
+      </div>
+      <div class="card-body" id="notes-body">${notesHtml(notes)}</div>
+    </div>`;
+}
+
+function bindNotes(base, reload, { withFollowup = false } = {}) {
+  document.querySelectorAll('[data-note-kind]').forEach(btn => {
+    btn.addEventListener('click', () => openNoteForm(base, btn.dataset.noteKind, reload, { withFollowup }));
+  });
+  document.querySelectorAll('[data-del-note]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!await confirmDialog('Ta bort anteckningen?')) return;
+      try {
+        await api.delete(`${base}/notes/${btn.dataset.delNote}`);
+        showToast('Anteckning borttagen', 'success');
+        reload();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
 }
 
 function stepRow(label, value) {
@@ -598,10 +803,11 @@ function notesHtml(notes) {
             <span class="badge badge-note-${esc(n.kind)}">${esc(NOTE_KINDS[n.kind] || n.kind)}</span>
             <span class="text-muted">${fmtD(n.note_date)}</span>
             ${n.created_by_name ? `<span class="text-muted">· ${esc(n.created_by_name)}</span>` : ''}
+            ${n.from_lead ? '<span class="text-muted" style="font-size:11px">· från förfrågan</span>' : ''}
             <div style="flex:1"></div>
-            <button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">
-              <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-            </button>
+            ${n.from_lead ? '' : `<button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">
+              ${TRASH_ICON}
+            </button>`}
           </div>
           <div class="timeline-body">${esc(n.body)}</div>
         </div>`).join('')}
@@ -654,27 +860,14 @@ function bindFileActions(leadId, reload) {
   });
 }
 
-function bindNoteActions(leadId, reload) {
-  document.querySelectorAll('[data-del-note]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!await confirmDialog('Ta bort anteckningen?')) return;
-      try {
-        await api.delete(`/sales/leads/${leadId}/notes/${btn.dataset.delNote}`);
-        showToast('Anteckning borttagen', 'success');
-        reload();
-      } catch (err) { showToast(err.message, 'error'); }
-    });
-  });
-}
-
-function openNoteForm(leadId, kind, onSaved) {
+function openNoteForm(base, kind, onSaved, { withFollowup = false } = {}) {
   openModal({
     title: NOTE_KINDS[kind] || 'Anteckning',
     body: `
       <form id="note-form">
         <div class="form-row">
           <div class="field"><label>Datum</label><input type="date" name="note_date" value="${todayISO()}"></div>
-          <div class="field"><label>Nästa uppföljning</label><input type="date" name="next_followup_date"></div>
+          ${withFollowup ? '<div class="field"><label>Nästa uppföljning</label><input type="date" name="next_followup_date"></div>' : ''}
         </div>
         <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus></textarea></div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
@@ -688,14 +881,14 @@ function openNoteForm(leadId, kind, onSaved) {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      await api.post(`/sales/leads/${leadId}/notes`, {
+      await api.post(`${base}/notes`, {
         kind,
         note_date: fd.get('note_date') || null,
         body: fd.get('body'),
       });
       // Uppföljningsdatumet ligger på förfrågan, inte på anteckningen – spara det separat
-      if (fd.get('next_followup_date')) {
-        await api.put(`/sales/leads/${leadId}`, { next_followup_date: fd.get('next_followup_date') });
+      if (withFollowup && fd.get('next_followup_date')) {
+        await api.put(base, { next_followup_date: fd.get('next_followup_date') });
       }
       showToast('Uppföljning sparad', 'success');
       closeModal();
@@ -906,9 +1099,14 @@ export async function renderSalesOrderDetail(el, id) {
 
   const topbarActions = document.getElementById('topbar-actions');
   if (topbarActions) topbarActions.innerHTML = `
-    <a href="#/sales?view=orders" class="btn btn-secondary btn-sm">← Tillbaka</a>
+    <a href="#/sales?view=${order.archived_at ? 'archive' : 'orders'}" class="btn btn-secondary btn-sm">← Tillbaka</a>
     ${order.lead_id ? `<a href="#/sales/${order.lead_id}" class="btn btn-secondary btn-sm">Visa förfrågan</a>` : ''}
-    <button class="btn btn-primary btn-sm" id="edit-order-btn">Redigera</button>`;
+    ${printButtons('order-pdf')}
+    <button class="btn btn-secondary btn-sm" id="edit-order-btn">Redigera</button>
+    ${order.archived_at
+      ? `<button class="btn btn-primary btn-sm" id="unarchive-btn">Återställ</button>`
+      : `<button class="btn btn-primary btn-sm" id="archive-btn">Avsluta &amp; arkivera</button>`}
+    <button class="btn-icon" id="delete-order-btn" title="Ta bort order">${TRASH_ICON}</button>`;
 
   // Avsnitten är milstolpsgrupperna plus AOC. Milstolparna kommer sorterade från
   // API:et, så gruppens plats ges av dess första milstolpe.
@@ -941,6 +1139,14 @@ export async function renderSalesOrderDetail(el, id) {
       </div>
     </div>
 
+    ${order.archived_at ? `
+      <div class="alert" style="margin-bottom:16px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2)">
+        Arkiverad ${fmtD(order.archived_at)} – ordern ligger under fliken Arkiv.
+      </div>` : ''}
+
+    <div class="order-top">
+      ${customerCardHtml(order)}
+
     <div class="card" style="margin-bottom:16px">
       <div class="card-header">
         <span class="card-title">Orderuppgifter</span>
@@ -962,6 +1168,9 @@ export async function renderSalesOrderDetail(el, id) {
         ${order.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2);white-space:pre-wrap">${esc(order.notes)}</p>` : ''}
       </div>
     </div>
+    </div>
+
+    <div id="order-gantt" style="margin-bottom:16px"></div>
 
     <div class="milestone-grid">
       ${sections.map(sec => sec.aoc
@@ -969,12 +1178,53 @@ export async function renderSalesOrderDetail(el, id) {
         : sectionHtml(sec, filesByGroup[sec.label] || [])
       ).join('')}
     </div>
+
+    <div style="margin-top:16px">
+      ${notesCardHtml(order.order_notes)}
+    </div>
   `;
 
   const reload = () => renderSalesOrderDetail(el, id);
+  const base = `/sales/orders/${id}`;
+
   document.getElementById('edit-order-btn').addEventListener('click', () => openOrderForm(order, reload));
+  bindPrintButtons('order-pdf', `${base}/pdf`, `order-${id}.pdf`);
+  bindNotes(base, reload);
+
+  document.getElementById('archive-btn')?.addEventListener('click', async () => {
+    if (!await confirmDialog(
+      `Avsluta och arkivera <strong>${esc(order.order_number || 'ordern')}</strong>? ` +
+      'Den flyttas till Arkiv men räknas fortfarande med i provisionen.', 'Arkivera'
+    )) return;
+    try {
+      await api.post(`${base}/archive`, {});
+      showToast('Order arkiverad', 'success');
+      reload();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('unarchive-btn')?.addEventListener('click', async () => {
+    try {
+      await api.post(`${base}/unarchive`, {});
+      showToast('Order återställd', 'success');
+      reload();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('delete-order-btn')?.addEventListener('click', async () => {
+    if (!await confirmDialog(
+      `Ta bort ordern <strong>${esc(order.order_number || '')}</strong> med milstolpar, AOC och filer? ` +
+      'Detta kan inte ångras.'
+    )) return;
+    try {
+      await api.delete(base);
+      showToast('Order borttagen', 'success');
+      location.hash = '#/sales?view=orders';
+    } catch (err) { showToast(err.message, 'error'); }
+  });
 
   bindOrderSections(el, id, reload);
+  loadSchedule(base, 'order-gantt', reload);
 }
 
 /** Ett vanligt avsnittskort: milstolpar överst, bilagor underst. */

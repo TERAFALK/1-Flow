@@ -3,24 +3,27 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..deps import require_admin
 from ..models import (
-    SalesLead, SalesLeadNote, SalesLeadFile, SalesLeadStatus,
-    SalesOrder, SalesMilestoneDef, SalesOrderMilestone,
+    SalesLead, SalesLeadNote, SalesLeadFile, SalesLeadStatus, SalesActivity,
+    SalesOrder, SalesOrderFile, SalesMilestoneDef, SalesOrderMilestone,
     Customer, ContactPerson, User,
 )
 from ..schemas import (
     SalesLeadCreate, SalesLeadUpdate, SalesLeadOut, SalesLeadListItem,
     SalesLeadNoteCreate, SalesLeadNoteOut, SalesLeadFileOut,
     SalesLeadConvert, SalesOrderOut, SalesPipelineStats,
+    SalesActivityCreate, SalesActivityUpdate, SalesActivityOut, SalesScheduleItem,
 )
+from ..sales_common import contact_fields, activity_out, lead_schedule, next_activity_sort
+from ..sales_pdf import build_lead_pdf
 from ..uploads import store_file, file_path, remove_file
-from .sales_orders import order_out
+from .sales_orders import order_out, UPLOAD_ROOT as ORDER_UPLOAD_ROOT
 
 router = APIRouter(prefix="/api/sales/leads", tags=["sales-leads"])
 
@@ -41,6 +44,7 @@ def _get(db: Session, lead_id: int) -> SalesLead:
             joinedload(SalesLead.assignee),
             joinedload(SalesLead.lead_notes).joinedload(SalesLeadNote.creator),
             joinedload(SalesLead.files),
+            joinedload(SalesLead.activities),
         )
         .filter(SalesLead.id == lead_id)
         .first()
@@ -54,15 +58,12 @@ def _base_fields(lead: SalesLead) -> dict:
     """Fälten som listvyn och detaljvyn delar."""
     notes = sorted(lead.lead_notes, key=lambda n: (n.note_date, n.id), reverse=True)
     latest = notes[0] if notes else None
-    # Kontaktpersonens e-post går före kundens – Excel hade e-posten per förfrågan
-    email = (lead.contact_person.email if lead.contact_person else None) or (
-        lead.customer.email if lead.customer else None
-    )
     return dict(
         id=lead.id,
         activity_number=lead.activity_number,
         customer_id=lead.customer_id,
-        customer_name=lead.customer.name if lead.customer else "",
+        # Kunduppgifterna visas likadant på förfrågan och på order
+        **contact_fields(lead.customer, lead.contact_person),
         product_type=lead.product_type,
         size=lead.size,
         quantity=lead.quantity,
@@ -76,7 +77,6 @@ def _base_fields(lead: SalesLead) -> dict:
         currency=lead.currency,
         next_followup_date=lead.next_followup_date,
         assignee_name=lead.assignee.full_name if lead.assignee else None,
-        contact_email=email,
         last_note=latest.body if latest else None,
         last_note_date=latest.note_date if latest else None,
         note_count=len(lead.lead_notes),
@@ -96,7 +96,11 @@ def _note_out(note: SalesLeadNote) -> SalesLeadNoteOut:
 
 
 def _out(db: Session, lead: SalesLead) -> SalesLeadOut:
-    order = db.query(SalesOrder.id).filter(SalesOrder.lead_id == lead.id).first()
+    order = (
+        db.query(SalesOrder.id, SalesOrder.order_number)
+        .filter(SalesOrder.lead_id == lead.id)
+        .first()
+    )
     notes = sorted(lead.lead_notes, key=lambda n: (n.note_date, n.id), reverse=True)
     return SalesLeadOut(
         **_base_fields(lead),
@@ -107,8 +111,10 @@ def _out(db: Session, lead: SalesLead) -> SalesLeadOut:
         created_at=lead.created_at,
         updated_at=lead.updated_at,
         order_id=order[0] if order else None,
+        order_number=order[1] if order else None,
         lead_notes=[_note_out(n) for n in notes],
         files=[SalesLeadFileOut.model_validate(f) for f in lead.files],
+        activities=[activity_out(a) for a in lead.activities],
     )
 
 
@@ -238,14 +244,99 @@ def update_lead(
 
 @router.delete("/{lead_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_lead(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """Tar bort förfrågan helt, inklusive en eventuell order som skapats ur den.
+    Gränssnittet namnger ordern i bekräftelsedialogen innan det anropar hit."""
     lead = _get(db, lead_id)
-    if db.query(SalesOrder.id).filter(SalesOrder.lead_id == lead_id).first():
-        raise HTTPException(status_code=400, detail="Förfrågan har en order och kan inte tas bort")
+
     # Filerna på disk följer inte med databasens cascade
     for f in lead.files:
         remove_file(UPLOAD_ROOT, lead_id, f.filename)
+
+    orders = db.query(SalesOrder).filter(SalesOrder.lead_id == lead_id).all()
+    for order in orders:
+        for f in db.query(SalesOrderFile).filter(SalesOrderFile.order_id == order.id).all():
+            remove_file(ORDER_UPLOAD_ROOT, order.id, f.filename)
+        db.delete(order)
+
     db.delete(lead)
     db.commit()
+
+
+# ── Schema och egna aktiviteter ───────────────────────────────────────────────
+
+@router.get("/{lead_id}/schedule", response_model=List[SalesScheduleItem])
+def get_schedule(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """Gantt-underlaget: datumfälten som automatiska poster plus egna aktiviteter."""
+    return lead_schedule(_get(db, lead_id))
+
+
+@router.get("/{lead_id}/activities", response_model=List[SalesActivityOut])
+def list_activities(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return [activity_out(a) for a in _get(db, lead_id).activities]
+
+
+@router.post("/{lead_id}/activities", response_model=SalesActivityOut, status_code=status.HTTP_201_CREATED)
+def create_activity(
+    lead_id: int,
+    body: SalesActivityCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    lead = _get(db, lead_id)
+    data = body.model_dump()
+    if data.get("sort_order") is None:
+        data["sort_order"] = next_activity_sort(lead.activities)
+    activity = SalesActivity(lead_id=lead_id, **data)
+    db.add(activity)
+    db.commit()
+    db.refresh(activity)
+    return activity_out(activity)
+
+
+@router.put("/{lead_id}/activities/{activity_id}", response_model=SalesActivityOut)
+def update_activity(
+    lead_id: int,
+    activity_id: int,
+    body: SalesActivityUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    activity = db.query(SalesActivity).filter(
+        SalesActivity.id == activity_id, SalesActivity.lead_id == lead_id
+    ).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Aktivitet ej hittad")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(activity, field, value)
+    db.commit()
+    db.refresh(activity)
+    return activity_out(activity)
+
+
+@router.delete("/{lead_id}/activities/{activity_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_activity(
+    lead_id: int,
+    activity_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    activity = db.query(SalesActivity).filter(
+        SalesActivity.id == activity_id, SalesActivity.lead_id == lead_id
+    ).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Aktivitet ej hittad")
+    db.delete(activity)
+    db.commit()
+
+
+@router.get("/{lead_id}/pdf")
+def lead_pdf(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    lead = _get(db, lead_id)
+    return StreamingResponse(
+        build_lead_pdf(lead),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="forfragan-{lead_id}.pdf"'},
+    )
 
 
 # ── Uppföljningslogg ──────────────────────────────────────────────────────────

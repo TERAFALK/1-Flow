@@ -219,7 +219,6 @@ function leadCard(lead) {
       <div class="lead-card-meta">
         ${lead.activity_number ? `<span>#${esc(lead.activity_number)}</span>` : ''}
         ${lead.date_request ? `<span>${fmtD(lead.date_request)}</span>` : ''}
-        ${lead.contact_phone ? `<span>${esc(lead.contact_phone)}</span>` : ''}
         ${lead.estimated_value ? `<span>${fmtMoney(lead.estimated_value, lead.currency)}</span>` : ''}
       </div>
       ${lead.last_note ? `<div class="lead-card-note">${fmtD(lead.last_note_date)} · ${esc(lead.last_note).slice(0, 90)}</div>` : ''}
@@ -295,7 +294,7 @@ function tableHtml(leads) {
           <thead><tr>
             <th>Aktivitet</th><th>Kund</th><th>Objekt</th><th>Storlek</th>
             <th>Förfrågan</th><th>Till FFB</th><th>Från FFB</th><th>Till kund</th>
-            <th>Status</th><th>Uppföljning</th><th>Telefon</th><th>E-post</th><th>Filer</th>
+            <th>Status</th><th>Uppföljning</th><th>E-post</th><th>Filer</th>
           </tr></thead>
           <tbody>
             ${leads.map(l => `
@@ -313,7 +312,6 @@ function tableHtml(leads) {
                   ${l.next_followup_date ? `<div>${fmtD(l.next_followup_date)}</div>` : ''}
                   ${l.last_note ? `<div style="font-size:12px">${esc(l.last_note).slice(0, 70)}</div>` : ''}
                 </td>
-                <td class="text-muted">${esc(l.contact_phone) || '–'}</td>
                 <td class="text-muted">${esc(l.contact_email) || '–'}</td>
                 <td class="text-muted">${l.file_count || 0}</td>
               </tr>`).join('')}

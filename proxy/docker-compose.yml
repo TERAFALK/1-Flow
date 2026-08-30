@@ -1,0 +1,25 @@
+# Caddy är enda tjänsten med publicerade portar. Flows containrar nås bara
+# via det delade nätverket "proxy", som skapas med:
+#   docker network create proxy
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - data:/data
+      - config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+
+volumes:
+  data:
+  config:

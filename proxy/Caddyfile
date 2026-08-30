@@ -1,0 +1,6 @@
+# Publik ingång till Flow. Caddy hämtar och förnyar certifikat automatiskt.
+# frontend-containern sköter /api-routingen vidare till backend internt.
+
+flow.sbtab.com {
+    reverse_proxy frontend:80
+}

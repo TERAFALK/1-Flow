@@ -286,10 +286,13 @@ class Activity(Base):
 
 
 class Task(Base):
+    """Uppgift på en arbetsorder eller på en offert. En offerts uppgifter flyttas
+    över till arbetsordern när affären blir såld."""
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
-    work_order_id = Column(Integer, ForeignKey("work_orders.id"), nullable=False)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"))
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"))
     title = Column(String, nullable=False)
     description = Column(Text)
     assigned_to = Column(Integer, ForeignKey("users.id"))
@@ -300,6 +303,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     work_order = relationship("WorkOrder", back_populates="tasks")
+    lead = relationship("SalesLead", back_populates="tasks")
     assigned_user = relationship("User", back_populates="tasks", foreign_keys=[assigned_to])
     creator = relationship("User", foreign_keys=[created_by])
 
@@ -503,6 +507,9 @@ class SalesLead(Base):
     activities = relationship(
         "SalesActivity", back_populates="lead", cascade="all, delete-orphan",
         order_by="SalesActivity.sort_order",
+    )
+    tasks = relationship(
+        "Task", back_populates="lead", cascade="all, delete-orphan", order_by="Task.id",
     )
 
 

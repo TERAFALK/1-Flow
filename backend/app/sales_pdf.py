@@ -226,11 +226,50 @@ def build_lead_pdf(lead) -> io.BytesIO:
         doc.heading("Uppföljning")
         doc.table(["Datum", "Typ", "Vad hände"], [24 * mm, 22 * mm, 128 * mm], notes)
 
+    if lead.tasks:
+        doc.heading("Uppgifter")
+        doc.table(["", "Uppgift", "Ansvarig", "Klart till"],
+                  [8 * mm, 92 * mm, 40 * mm, 28 * mm], _task_rows(lead.tasks))
+
     if lead.files:
         doc.heading("Filer")
-        doc.table(["Fil", "Uppladdad"], [120 * mm, 40 * mm],
-                  [(f.original_name, _d(f.uploaded_at.date() if f.uploaded_at else None)) for f in lead.files])
+        doc.table(["Fil", "Typ", "Uppladdad"], [100 * mm, 24 * mm, 36 * mm],
+                  [(f.original_name,
+                    "Bild" if (f.mime_type or "").startswith("image/") else "Dokument",
+                    _d(f.uploaded_at.date() if f.uploaded_at else None))
+                   for f in lead.files])
 
+    return doc.finish()
+
+
+def _task_rows(tasks) -> list:
+    return [
+        (
+            "[x]" if t.completed else "[ ]",
+            t.title + (f" – {t.description}" if t.description else ""),
+            t.assigned_user.full_name if t.assigned_user else "",
+            _d(t.due_date.date() if t.due_date else None),
+        )
+        for t in sorted(tasks, key=lambda t: (t.completed, t.id))
+    ]
+
+
+def build_lead_tasks_pdf(lead) -> io.BytesIO:
+    """Bara uppgiftslistan, att ta med ut i verkstaden. Motsvarar arbetsorderns
+    'Skriv ut lista'."""
+    ffb = lead.kind == SalesLeadKind.feldbinder
+    done = sum(1 for t in lead.tasks if t.completed)
+    doc = _Doc(
+        "Uppgifter",
+        f"{'Offertförfrågan' if ffb else 'Offert'}"
+        + (f" {lead.quote_number}" if lead.quote_number else f" #{lead.id}")
+        + f" · {lead.customer.name if lead.customer else ''}"
+        + f" · {done} av {len(lead.tasks)} klara",
+    )
+    if lead.description:
+        doc.text(lead.description)
+    doc.table(["", "Uppgift", "Ansvarig", "Klart till"],
+              [8 * mm, 92 * mm, 40 * mm, 28 * mm], _task_rows(lead.tasks))
     return doc.finish()
 
 

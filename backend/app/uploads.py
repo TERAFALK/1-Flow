@@ -30,3 +30,19 @@ def remove_file(root: str, key, stored_name: str) -> None:
     path = file_path(root, key, stored_name)
     if os.path.exists(path):
         os.remove(path)
+
+
+def copy_file(src_root: str, src_key, dest_root: str, dest_key, stored_name: str) -> str:
+    """Kopierar en redan lagrad fil till ett annat objekt och returnerar det nya
+    filnamnet. Används när en offert blir arbetsorder – bilagorna ska följa med
+    utan att originalet försvinner om offerten sedan raderas."""
+    src = file_path(src_root, src_key, stored_name)
+    if not os.path.exists(src):
+        return ""
+    ext = os.path.splitext(stored_name)[1].lower()
+    new_name = f"{uuid.uuid4()}{ext}"
+    folder = os.path.join(dest_root, str(dest_key))
+    os.makedirs(folder, exist_ok=True)
+    with open(src, "rb") as fsrc, open(os.path.join(folder, new_name), "wb") as fdst:
+        fdst.write(fsrc.read())
+    return new_name

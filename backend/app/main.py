@@ -336,6 +336,10 @@ def _run_migrations():
         "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL",
         "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP",
         "CREATE INDEX IF NOT EXISTS ix_sales_leads_archived_at ON sales_leads (archived_at)",
+        # Uppgifter kan nu ligga på en offert och flyttas till arbetsordern vid försäljning
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lead_id INTEGER REFERENCES sales_leads(id) ON DELETE CASCADE",
+        "ALTER TABLE tasks ALTER COLUMN work_order_id DROP NOT NULL",
+        "CREATE INDEX IF NOT EXISTS ix_tasks_lead_id ON tasks (lead_id)",
     ]
     with engine.connect() as conn:
         for stmt in stmts:

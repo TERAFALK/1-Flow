@@ -3,6 +3,7 @@ import { statusBadge, fmtDate, fmtDuration } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { renderGantt } from '../components/gantt.js';
+import { makeSearchable } from '../components/combobox.js';
 
 const WO_STATUS_LABELS = {
   ny: 'Ny',
@@ -174,6 +175,9 @@ export async function renderNewWorkOrder(el, params = {}) {
 
   const custSel = document.getElementById('wo-customer');
   const vehSel = document.getElementById('wo-vehicle');
+  // Kundregistret kan vara långt – gör väljarna sökbara
+  makeSearchable(custSel, { placeholder: 'Sök kund…' });
+  makeSearchable(vehSel, { placeholder: 'Sök reg.nr…' });
   const contactSel = document.getElementById('wo-contact');
 
   async function loadContacts(cid) {

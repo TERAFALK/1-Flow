@@ -474,7 +474,9 @@ class TaskUpdate(BaseModel):
 class TaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    work_order_id: int
+    # Uppgiften hänger på antingen en arbetsorder eller en offert
+    work_order_id: Optional[int] = None
+    lead_id: Optional[int] = None
     title: str
     description: Optional[str]
     assigned_to: Optional[int]
@@ -836,6 +838,7 @@ class SalesLeadOut(SalesLeadListItem):
     lead_notes: List[SalesLeadNoteOut] = []
     files: List[SalesLeadFileOut] = []
     activities: List[SalesActivityOut] = []
+    tasks: List["TaskOut"] = []
 
 
 class SalesLeadConvert(BaseModel):

@@ -2,6 +2,7 @@ import { api, downloadFile } from '../api.js';
 import { fmtDate, statusBadge } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { makeAllSearchable } from '../components/combobox.js';
 
 export async function renderVehicles(el, params = {}) {
   let allRows = [];
@@ -573,6 +574,8 @@ async function openVehicleForm(vehicle, defaultCustomerId, onSaved) {
   }
   renderAxleRows(initAxles.length);
   axleCountSel.addEventListener('change', () => renderAxleRows(parseInt(axleCountSel.value)));
+
+  makeAllSearchable(document.getElementById('vehicle-form'));
 
   document.getElementById('vehicle-form').addEventListener('submit', async (e) => {
     e.preventDefault();

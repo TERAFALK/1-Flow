@@ -12,19 +12,22 @@ from ..deps import require_admin
 from ..models import (
     SalesLead, SalesLeadNote, SalesLeadFile, SalesLeadStatus, SalesLeadKind,
     SalesActivity, SalesOrder, SalesOrderFile, SalesMilestoneDef, SalesOrderMilestone,
-    Customer, ContactPerson, WorkOrder, WorkOrderStatus, Settings, User,
+    Customer, ContactPerson, WorkOrder, WorkOrderFile, WorkOrderStatus, FileType,
+    Settings, Task, User,
 )
 from ..schemas import (
     SalesLeadCreate, SalesLeadUpdate, SalesLeadOut, SalesLeadListItem,
     SalesLeadNoteCreate, SalesLeadNoteOut, SalesLeadFileOut,
     SalesLeadConvert, SalesLeadToWorkOrder, SalesOrderOut, SalesPipelineStats,
     SalesActivityCreate, SalesActivityUpdate, SalesActivityOut, SalesScheduleItem,
+    TaskCreate, TaskUpdate, TaskOut,
 )
 from ..sales_common import contact_fields, activity_out, lead_schedule, next_activity_sort
-from ..sales_pdf import build_lead_pdf
-from ..uploads import store_file, file_path, remove_file
+from ..sales_pdf import build_lead_pdf, build_lead_tasks_pdf
+from ..uploads import store_file, file_path, remove_file, copy_file
 from .sales_orders import order_out, UPLOAD_ROOT as ORDER_UPLOAD_ROOT
 from .work_orders import _next_order_number
+from .files import UPLOAD_ROOT as WORK_ORDER_UPLOAD_ROOT
 
 router = APIRouter(prefix="/api/sales/leads", tags=["sales-leads"])
 
@@ -47,6 +50,7 @@ def _get(db: Session, lead_id: int) -> SalesLead:
             joinedload(SalesLead.files),
             joinedload(SalesLead.activities),
             joinedload(SalesLead.work_order),
+            joinedload(SalesLead.tasks).joinedload(Task.assigned_user),
         )
         .filter(SalesLead.id == lead_id)
         .first()
@@ -122,6 +126,7 @@ def _out(db: Session, lead: SalesLead) -> SalesLeadOut:
         lead_notes=[_note_out(n) for n in notes],
         files=[SalesLeadFileOut.model_validate(f) for f in lead.files],
         activities=[activity_out(a) for a in lead.activities],
+        tasks=[TaskOut.model_validate(t) for t in lead.tasks],
     )
 
 
@@ -595,9 +600,107 @@ def convert_to_work_order(
     db.add(wo)
     db.flush()
 
+    # Uppgifterna flyttas – de hör till jobbet, inte till offerten
+    for task in lead.tasks:
+        task.lead_id = None
+        task.work_order_id = wo.id
+
+    # Bilagorna kopieras istället, så att offerten behåller sina egna. Bilder
+    # hamnar under Foton i arbetsordern, resten under Dokument.
+    for f in lead.files:
+        new_name = copy_file(UPLOAD_ROOT, lead.id, WORK_ORDER_UPLOAD_ROOT, wo.id, f.filename)
+        if not new_name:
+            continue
+        db.add(WorkOrderFile(
+            work_order_id=wo.id,
+            filename=new_name,
+            original_name=f.original_name,
+            file_type=FileType.photo if (f.mime_type or "").startswith("image/") else FileType.document,
+            mime_type=f.mime_type,
+            size_bytes=f.size_bytes,
+            uploaded_by=current_user.id,
+        ))
+
     lead.work_order_id = wo.id
     lead.status = SalesLeadStatus.sald
     lead.next_followup_date = None
     db.commit()
     db.refresh(wo)
     return {"id": wo.id, "order_number": wo.order_number}
+
+
+# ── Uppgifter ─────────────────────────────────────────────────────────────────
+
+def _get_task(db: Session, lead_id: int, task_id: int) -> Task:
+    task = db.query(Task).filter(Task.id == task_id, Task.lead_id == lead_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Uppgift ej hittad")
+    return task
+
+
+@router.get("/{lead_id}/tasks", response_model=List[TaskOut])
+def list_lead_tasks(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    _get(db, lead_id)
+    return (
+        db.query(Task)
+        .options(joinedload(Task.assigned_user))
+        .filter(Task.lead_id == lead_id)
+        .order_by(Task.id)
+        .all()
+    )
+
+
+@router.post("/{lead_id}/tasks", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
+def create_lead_task(
+    lead_id: int,
+    body: TaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    _get(db, lead_id)
+    task = Task(lead_id=lead_id, created_by=current_user.id, **body.model_dump())
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.put("/{lead_id}/tasks/{task_id}", response_model=TaskOut)
+def update_lead_task(
+    lead_id: int,
+    task_id: int,
+    body: TaskUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    task = _get_task(db, lead_id, task_id)
+    fields = body.model_dump(exclude_unset=True)
+    # Tidsstämpeln följer kryssrutan så att listan kan visa när något blev klart
+    if "completed" in fields:
+        task.completed_at = datetime.utcnow() if fields["completed"] else None
+    for field, value in fields.items():
+        setattr(task, field, value)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.delete("/{lead_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_lead_task(
+    lead_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    db.delete(_get_task(db, lead_id, task_id))
+    db.commit()
+
+
+@router.get("/{lead_id}/tasks/pdf")
+def lead_tasks_pdf(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    lead = _get(db, lead_id)
+    return StreamingResponse(
+        build_lead_tasks_pdf(lead),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="uppgifter-offert-{lead_id}.pdf"'},
+    )

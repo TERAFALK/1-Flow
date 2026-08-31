@@ -591,11 +591,68 @@ class SettingUpdate(BaseModel):
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
+class ActiveTimer(BaseModel):
+    """En tidtagning som fortfarande löper – vem som jobbar på vad just nu."""
+    user_name: str
+    order_id: int
+    order_number: str
+    started_at: datetime
+
+
+class SalesAreaSummary(BaseModel):
+    """En rad per försäljningsdel. `extra_*` skiljer sig åt: Feldbinder visar
+    obetald provision, verkstadsdelen antalet som blivit arbetsorder."""
+    kind: str
+    label: str
+    route: str
+    currency: str
+    open_leads: int = 0
+    open_value: Decimal = Decimal("0")
+    overdue_followups: int = 0
+    sold_ytd_count: int = 0
+    sold_ytd_value: Decimal = Decimal("0")
+    extra_label: str = ""
+    extra_value: str = ""
+
+
+class UpcomingItem(BaseModel):
+    """Post i listan över de närmaste 30 dagarna. Passerade datum tas med och
+    märks som försenade istället för att tystna."""
+    date: date
+    kind: str            # 'leverans' | 'arbetsorder'
+    label: str
+    sub: Optional[str] = None
+    link: str
+    overdue: bool = False
+
+
+class MonthlySalesPoint(BaseModel):
+    """Sålt värde en månad. Valutorna hålls isär – EUR och SEK går inte att
+    summera ihop, och grafen ritar en serie i taget."""
+    month: str           # YYYY-MM
+    feldbinder: Decimal = Decimal("0")
+    verkstad: Decimal = Decimal("0")
+
+
 class DashboardStats(BaseModel):
-    total_open: int
-    by_status: dict
+    # Kräver åtgärd
+    overdue_followups: int = 0
+    overdue_tasks: int = 0
     scheduled_today: int
     ready_to_invoice: int
+
+    # Verkstaden
+    total_open: int
+    by_status: dict
+    completed_this_week: int = 0
+    active_timers: List[ActiveTimer] = []
+
+    # Försäljning
+    sales: List[SalesAreaSummary] = []
+    monthly_sales: List[MonthlySalesPoint] = []
+
+    # Listor
+    upcoming: List[UpcomingItem] = []
     recent_orders: List[WorkOrderListItem]
 
 

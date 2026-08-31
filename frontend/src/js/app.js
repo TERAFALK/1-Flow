@@ -24,8 +24,26 @@ window.__flowAppBooted = true;
 
 if (isPrimaryInstance) console.log('Flow app.js loaded', new Date().toISOString());
 
+/** "ResizeObserver loop completed with undelivered notifications" är en avisering
+ *  från webbläsaren, inte ett fel: den betyder att en observation sköts upp till
+ *  nästa frame och att ingenting gick förlorat.
+ *
+ *  Appen skapar inga egna ResizeObservers – den kommer ur webbläsarens egen
+ *  layouthantering (autofyll, rullister, fontinläsning) och dyker därför upp
+ *  just vid inloggningen, när #app går från dold till synlig och hela sidan
+ *  läggs om på en gång.
+ *
+ *  Ett riktigt undantag har alltid ett Error-objekt i e.error. Den här har bara
+ *  ett meddelande, och det är den skillnaden vi filtrerar på – så att en verklig
+ *  krasch fortfarande syns.
+ */
+function isBenignBrowserNotice(e) {
+  return !e.error && /ResizeObserver loop/i.test(e.message || '');
+}
+
 if (isPrimaryInstance) {
 window.addEventListener('error', (e) => {
+  if (isBenignBrowserNotice(e)) return;
   console.error('Ohanterat fel:', e.error || e.message);
   showToast(`Fel: ${e.error?.message || e.message}`, 'error');
 });

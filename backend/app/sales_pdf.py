@@ -7,6 +7,7 @@ from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 
+from .models import SalesLeadKind
 from .pdf_utils import draw_header, draw_info_panel, draw_paragraph, truncate
 from .sales_common import lead_schedule, order_schedule
 
@@ -170,39 +171,45 @@ def _note_rows(notes) -> list:
 
 
 def build_lead_pdf(lead) -> io.BytesIO:
+    ffb = lead.kind == SalesLeadKind.feldbinder
     objekt = " ".join(x for x in [lead.product_type, lead.size] if x)
     doc = _Doc(
-        "Offertförfrågan",
+        "Offertförfrågan" if ffb else "Offert",
         f"{lead.customer.name if lead.customer else ''}"
         + (f" · {objekt}" if objekt else "")
         + (f" · Aktivitet {lead.activity_number}" if lead.activity_number else ""),
     )
 
-    doc.panels(
-        ("Kund", _customer_rows(lead)),
-        ("Förfrågan", [
-            ("Status", STATUS_LABELS.get(getattr(lead.status, "value", lead.status), "")),
+    rows = [("Status", STATUS_LABELS.get(getattr(lead.status, "value", lead.status), ""))]
+    if ffb:
+        rows += [
             ("Aktivitetsnr", lead.activity_number),
             ("Objekt", objekt),
             ("Antal", lead.quantity if (lead.quantity or 0) > 1 else ""),
-            ("Offertnummer", lead.quote_number),
-            ("Uppskattat värde", _money(lead.estimated_value, lead.currency)),
-            ("Ansvarig", lead.assignee.full_name if lead.assignee else ""),
-            ("Nästa uppföljning", _d(lead.next_followup_date)),
-            ("Avslutsorsak", lead.lost_reason),
-        ]),
-    )
+        ]
+    rows += [
+        ("Offertnummer", lead.quote_number),
+        ("Uppskattat värde", _money(lead.estimated_value, lead.currency)),
+        ("Ansvarig", lead.assignee.full_name if lead.assignee else ""),
+        ("Nästa uppföljning", _d(lead.next_followup_date)),
+        ("Avslutsorsak", lead.lost_reason),
+        ("Arkiverad", _d(lead.archived_at.date() if lead.archived_at else None)),
+    ]
+    doc.panels(("Kund", _customer_rows(lead)), ("Förfrågan", rows))
 
-    doc.heading("Tidslinje")
-    doc.table(
-        ["Steg", "Datum"], [70 * mm, 40 * mm],
-        [
-            ("Förfrågan inkom", _d(lead.date_request)),
+    if lead.description:
+        doc.heading("Beskrivning")
+        doc.text(lead.description)
+
+    steps = [("Förfrågan inkom", _d(lead.date_request))]
+    if ffb:
+        steps += [
             ("Skickad till FFB", _d(lead.date_sent_ffb)),
             ("Tillbaka från FFB", _d(lead.date_back_ffb)),
-            ("Offert skickad till kund", _d(lead.date_sent_customer)),
-        ],
-    )
+        ]
+    steps.append(("Offert skickad till kund", _d(lead.date_sent_customer)))
+    doc.heading("Tidslinje")
+    doc.table(["Steg", "Datum"], [70 * mm, 40 * mm], steps)
 
     schedule = lead_schedule(lead)
     if schedule:
@@ -211,7 +218,7 @@ def build_lead_pdf(lead) -> io.BytesIO:
                   [80 * mm, 30 * mm, 30 * mm, 20 * mm], _schedule_rows(schedule))
 
     if lead.notes:
-        doc.heading("Anteckningar")
+        doc.heading("Interna anteckningar")
         doc.text(lead.notes)
 
     notes = _note_rows(lead.lead_notes)

@@ -430,6 +430,13 @@ class SalesLeadStatus(str, PyEnum):
     avslutad = "avslutad"
 
 
+class SalesLeadKind(str, PyEnum):
+    # OBS: SQLAlchemy lagrar medlemmens NAMN i Postgres-enumen `salesleadkind`,
+    # så nya medlemmar kräver ALTER TYPE-migration i main.py.
+    feldbinder = "feldbinder"   # tankpåbyggnader via FFB – hela milstolpskedjan
+    verkstad = "verkstad"       # offerter på verkstadsjobb – blir en arbetsorder
+
+
 class SalesNoteKind(str, PyEnum):
     samtal = "samtal"
     mail = "mail"
@@ -448,6 +455,11 @@ class SalesLead(Base):
     __tablename__ = "sales_leads"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Vilken affärstyp förfrågan hör till. Fälten nedan som rör FFB används bara
+    # av feldbinder-förfrågningar; verkstadsofferter lämnar dem tomma.
+    kind = Column(
+        Enum(SalesLeadKind), default=SalesLeadKind.feldbinder, nullable=False, index=True
+    )
     activity_number = Column(String, index=True)          # Aktivitet (HubSpot-nr)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
     contact_person_id = Column(Integer, ForeignKey("contact_persons.id"))
@@ -468,7 +480,11 @@ class SalesLead(Base):
     assigned_to = Column(Integer, ForeignKey("users.id"))
     external_link = Column(String)                        # Offert Länk – gammal UNC-sökväg
     lost_reason = Column(String)
-    notes = Column(Text)
+    description = Column(Text)                            # vad förfrågan gäller
+    notes = Column(Text)                                  # interna anteckningar
+    # En verkstadsoffert blir en arbetsorder när den säljs, inte en SalesOrder
+    work_order_id = Column(Integer, ForeignKey("work_orders.id"))
+    archived_at = Column(DateTime, index=True)
 
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -476,6 +492,7 @@ class SalesLead(Base):
 
     customer = relationship("Customer", back_populates="sales_leads")
     contact_person = relationship("ContactPerson")
+    work_order = relationship("WorkOrder")
     assignee = relationship("User", foreign_keys=[assigned_to])
     creator = relationship("User", foreign_keys=[created_by])
     lead_notes = relationship(

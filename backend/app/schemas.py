@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from .models import (
     UserRole, WorkOrderStatus, TimeEntryType, StockTransactionType,
     PurchaseStatus, FileType, ActivityType,
-    SalesLeadStatus, SalesNoteKind, MilestoneValueType,
+    SalesLeadStatus, SalesLeadKind, SalesNoteKind, MilestoneValueType,
 )
 
 
@@ -755,6 +755,8 @@ class SalesLeadFileOut(BaseModel):
 
 class SalesLeadCreate(BaseModel):
     customer_id: int
+    kind: SalesLeadKind = SalesLeadKind.feldbinder
+    description: Optional[str] = None
     activity_number: Optional[str] = None
     contact_person_id: Optional[int] = None
     product_type: Optional[str] = None
@@ -778,6 +780,9 @@ class SalesLeadCreate(BaseModel):
 class SalesLeadUpdate(SalesLeadCreate):
     # Alla fält valfria vid uppdatering – samma grepp som CustomerUpdate
     customer_id: Optional[int] = None
+    # kind sätts vid skapandet och byts inte i efterhand – en verkstadsoffert och
+    # en feldbinder-affär har olika fält och olika väg vidare när de säljs
+    kind: Optional[SalesLeadKind] = None
     quantity: Optional[int] = None
     status: Optional[SalesLeadStatus] = None
     currency: Optional[str] = None
@@ -786,6 +791,8 @@ class SalesLeadUpdate(SalesLeadCreate):
 class SalesLeadListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    kind: SalesLeadKind
+    description: Optional[str] = None
     activity_number: Optional[str]
     customer_id: int
     customer_name: str = ""
@@ -814,6 +821,9 @@ class SalesLeadListItem(BaseModel):
     file_count: int = 0
     order_id: Optional[int] = None
     order_number: Optional[str] = None
+    work_order_id: Optional[int] = None
+    work_order_number: Optional[str] = None
+    archived_at: Optional[datetime] = None
 
 
 class SalesLeadOut(SalesLeadListItem):
@@ -1013,6 +1023,16 @@ class SalesPipelineStats(BaseModel):
     open_leads: int = 0
     overdue_followups: int = 0
     open_value: Decimal = Decimal("0")
+    currency: str = "EUR"
+
+
+class SalesLeadToWorkOrder(BaseModel):
+    """Fälten som fylls i när en verkstadsoffert blir en arbetsorder."""
+    order_number: Optional[str] = None
+    description: Optional[str] = None
+    vehicle_id: Optional[int] = None
+    assigned_to: Optional[int] = None
+    scheduled_date: Optional[datetime] = None
 
 
 Token.model_rebuild()

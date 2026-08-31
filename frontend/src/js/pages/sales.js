@@ -69,6 +69,12 @@ async function productTypes() {
   }
 }
 
+/** Första raden ur ett fritextfält – används som rubrik i listorna. */
+function firstLine(text, max) {
+  const line = String(text || '').split('\n')[0].trim();
+  return line.length > max ? line.slice(0, max) + '…' : line;
+}
+
 function progressBar(done, total) {
   const pct = total ? Math.round((done / total) * 100) : 0;
   return `
@@ -80,25 +86,66 @@ function progressBar(done, total) {
 
 // ── Huvudsida ─────────────────────────────────────────────────────────────────
 
+// ── De två försäljningsdelarna ────────────────────────────────────────────────
+// Feldbinder-affärer går hela FFB-kedjan och blir en såld order med milstolpar.
+// Verkstadsofferter är en enklare variant i kronor som blir en arbetsorder.
+// Allt annat – uppföljning, filer, schema, utskrift – är gemensamt.
+
+const AREAS = {
+  feldbinder: {
+    kind: 'feldbinder',
+    route: '/sales',
+    title: 'Feldbinder',
+    subtitle: 'Offertförfrågningar, sålda ordrar och provision',
+    currency: 'EUR',
+    ffb: true,
+    tabs: [
+      { view: 'pipeline',   label: 'Förfrågningar' },
+      { view: 'orders',     label: 'Sålda ordrar' },
+      { view: 'commission', label: 'Provision' },
+      { view: 'archive',    label: 'Arkiv' },
+    ],
+  },
+  verkstad: {
+    kind: 'verkstad',
+    route: '/quotes',
+    title: 'Offerter',
+    subtitle: 'Offerter på verkstadsjobb – blir en arbetsorder när de säljs',
+    currency: 'SEK',
+    ffb: false,
+    tabs: [
+      { view: 'pipeline', label: 'Offerter' },
+      { view: 'archive',  label: 'Arkiv' },
+    ],
+  },
+};
+
 export async function renderSales(el, params = {}) {
+  return renderArea(el, params, AREAS.feldbinder);
+}
+
+export async function renderQuotes(el, params = {}) {
+  return renderArea(el, params, AREAS.verkstad);
+}
+
+async function renderArea(el, params, area) {
   const view = params.view || 'pipeline';
 
   const topbarActions = document.getElementById('topbar-actions');
   if (topbarActions) topbarActions.innerHTML = `
     <button class="btn btn-primary btn-sm" id="new-lead-btn">
       <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
-      Ny förfrågan
+      ${area.ffb ? 'Ny förfrågan' : 'Ny offert'}
     </button>`;
 
   el.innerHTML = `
-    <div style="margin-bottom:4px" class="page-title">Försäljning</div>
-    <div class="page-subtitle" style="margin-bottom:20px">Offertförfrågningar, sålda ordrar och provision</div>
+    <div style="margin-bottom:4px" class="page-title">${esc(area.title)}</div>
+    <div class="page-subtitle" style="margin-bottom:20px">${esc(area.subtitle)}</div>
 
     <div class="tabs" id="sales-tabs">
-      <div class="tab ${view === 'pipeline' ? 'active' : ''}" data-view="pipeline">Förfrågningar</div>
-      <div class="tab ${view === 'orders' ? 'active' : ''}" data-view="orders">Sålda ordrar</div>
-      <div class="tab ${view === 'commission' ? 'active' : ''}" data-view="commission">Provision</div>
-      <div class="tab ${view === 'archive' ? 'active' : ''}" data-view="archive">Arkiv</div>
+      ${area.tabs.map(t => `
+        <div class="tab ${view === t.view ? 'active' : ''}" data-view="${t.view}">${t.label}</div>
+      `).join('')}
     </div>
 
     <div id="sales-view"><div class="loading">Laddar…</div></div>
@@ -106,24 +153,29 @@ export async function renderSales(el, params = {}) {
 
   document.getElementById('sales-tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('.tab');
-    if (tab) location.hash = `#/sales?view=${tab.dataset.view}`;
+    if (tab) location.hash = `#${area.route}?view=${tab.dataset.view}`;
   });
 
   document.getElementById('new-lead-btn')?.addEventListener('click', () =>
-    openLeadForm(null, () => renderSales(el, params))
+    openLeadForm(null, () => renderArea(el, params, area), area)
   );
 
   const host = document.getElementById('sales-view');
   if (!host) return;
   if (view === 'orders') return renderOrdersView(host);
   if (view === 'commission') return renderCommissionView(host);
-  if (view === 'archive') return renderOrdersView(host, { archived: true });
-  return renderPipelineView(host);
+  if (view === 'archive') {
+    // Feldbinder arkiverar sålda ordrar, verkstadsdelen arkiverar offerterna
+    return area.ffb
+      ? renderOrdersView(host, { archived: true })
+      : renderPipelineView(host, area, { archived: true });
+  }
+  return renderPipelineView(host, area);
 }
 
 // ── Vy 1: förfrågningar (kanban + tabell) ─────────────────────────────────────
 
-async function renderPipelineView(host) {
+async function renderPipelineView(host, area, { archived = false } = {}) {
   // Excel-vanan är en tabell, men kanban gör bevakningen mycket lättare – båda finns
   let mode = localStorage.getItem('flow_sales_mode') || 'kanban';
   let leads = [];
@@ -135,7 +187,7 @@ async function renderPipelineView(host) {
       <div class="card-header" style="gap:10px;flex-wrap:wrap">
         <div class="search-wrap">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
-          <input type="search" id="lead-search" placeholder="Sök kund, aktivitetsnr, offertnr…">
+          <input type="search" id="lead-search" placeholder="${area.ffb ? 'Sök kund, aktivitetsnr, offertnr…' : 'Sök kund eller offertnr…'}">
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
           <input type="checkbox" id="lead-overdue"> Endast uppföljning som passerat
@@ -146,8 +198,12 @@ async function renderPipelineView(host) {
           <button class="btn btn-secondary btn-sm" id="mode-table">Tabell</button>
         </div>
       </div>
-      <div id="lead-stats" class="sales-stats"></div>
+      ${archived ? '' : '<div id="lead-stats" class="sales-stats"></div>'}
     </div>
+    ${archived ? `
+      <p class="text-muted" style="font-size:13px;margin:-6px 0 14px">
+        Arkiverade offerter. Öppna en och välj <strong>Återställ</strong> för att flytta tillbaka den.
+      </p>` : ''}
     <div id="lead-body"><div class="loading">Laddar…</div></div>
   `;
 
@@ -170,22 +226,23 @@ async function renderPipelineView(host) {
   }
 
   async function load() {
-    const qs = new URLSearchParams();
+    const qs = new URLSearchParams({ kind: area.kind });
     if (query) qs.set('q', query);
     if (onlyOverdue) qs.set('followup', 'overdue');
+    if (archived) qs.set('archived', 'true');
     const [rows, stats] = await Promise.all([
-      api.get(`/sales/leads${qs.toString() ? `?${qs}` : ''}`),
-      api.get('/sales/leads/stats').catch(() => null),
+      api.get(`/sales/leads?${qs}`),
+      api.get(`/sales/leads/stats?kind=${area.kind}`).catch(() => null),
     ]);
     leads = rows;
     const statsEl = document.getElementById('lead-stats');
-    if (!statsEl) return;
-    if (stats) {
+    if (!document.getElementById('lead-body')) return;
+    if (stats && statsEl) {
       statsEl.innerHTML = `
-        <div class="sales-stat"><span>Öppna förfrågningar</span><strong>${stats.open_leads}</strong></div>
+        <div class="sales-stat"><span>${area.ffb ? 'Öppna förfrågningar' : 'Öppna offerter'}</span><strong>${stats.open_leads}</strong></div>
         <div class="sales-stat"><span>Uppföljning passerad</span><strong class="${stats.overdue_followups ? 'text-danger' : ''}">${stats.overdue_followups}</strong></div>
         <div class="sales-stat"><span>Sålda</span><strong>${stats.by_status?.sald ?? 0}</strong></div>
-        <div class="sales-stat"><span>Öppet värde</span><strong>${fmtMoney(stats.open_value, 'EUR')}</strong></div>`;
+        <div class="sales-stat"><span>Öppet värde</span><strong>${fmtMoney(stats.open_value, stats.currency || area.currency)}</strong></div>`;
     }
     draw();
   }
@@ -196,28 +253,35 @@ async function renderPipelineView(host) {
     document.getElementById('mode-kanban').classList.toggle('btn-primary', mode === 'kanban');
     document.getElementById('mode-table').classList.toggle('btn-primary', mode === 'table');
     if (!leads.length) {
-      body.innerHTML = `<div class="card"><div class="empty-state"><p>Inga förfrågningar hittades</p></div></div>`;
+      const tomt = archived ? 'Arkivet är tomt'
+        : area.ffb ? 'Inga förfrågningar hittades' : 'Inga offerter hittades';
+      body.innerHTML = `<div class="card"><div class="empty-state"><p>${tomt}</p></div></div>`;
       return;
     }
-    body.innerHTML = mode === 'kanban' ? kanbanHtml(leads) : tableHtml(leads);
-    if (mode === 'kanban') bindKanban(load);
+    body.innerHTML = mode === 'kanban' ? kanbanHtml(leads, area) : tableHtml(leads, area);
+    if (mode === 'kanban') bindKanban(load, area);
   }
 
   await load();
 }
 
-function leadCard(lead) {
-  const objekt = [lead.product_type, lead.size].filter(Boolean).join(' ');
+function leadCard(lead, area) {
+  // Verkstadsofferter har ingen objekttyp – där är beskrivningen det som säger
+  // vad affären gäller
+  const rubrik = area.ffb
+    ? [lead.product_type, lead.size].filter(Boolean).join(' ')
+    : firstLine(lead.description, 70);
   return `
     <div class="lead-card" draggable="true" data-lead-id="${lead.id}"
-         onclick="location.hash='#/sales/${lead.id}'">
+         onclick="location.hash='#${area.route}/${lead.id}'">
       <div class="lead-card-top">
         <strong>${esc(lead.customer_name)}</strong>
         ${isOverdue(lead) ? '<span class="lead-dot" title="Uppföljningsdatum har passerat"></span>' : ''}
       </div>
-      ${objekt ? `<div class="lead-card-obj">${esc(objekt)}${lead.quantity > 1 ? ` · ${lead.quantity} st` : ''}</div>` : ''}
+      ${rubrik ? `<div class="lead-card-obj">${esc(rubrik)}${area.ffb && lead.quantity > 1 ? ` · ${lead.quantity} st` : ''}</div>` : ''}
       <div class="lead-card-meta">
-        ${lead.activity_number ? `<span>#${esc(lead.activity_number)}</span>` : ''}
+        ${area.ffb && lead.activity_number ? `<span>#${esc(lead.activity_number)}</span>` : ''}
+        ${!area.ffb && lead.quote_number ? `<span>${esc(lead.quote_number)}</span>` : ''}
         ${lead.date_request ? `<span>${fmtD(lead.date_request)}</span>` : ''}
         ${lead.estimated_value ? `<span>${fmtMoney(lead.estimated_value, lead.currency)}</span>` : ''}
       </div>
@@ -226,7 +290,7 @@ function leadCard(lead) {
     </div>`;
 }
 
-function kanbanHtml(leads) {
+function kanbanHtml(leads, area) {
   return `
     <div class="kanban">
       ${STATUSES.map(s => {
@@ -238,14 +302,14 @@ function kanbanHtml(leads) {
               <span class="kanban-count">${inCol.length}</span>
             </div>
             <div class="kanban-col-body">
-              ${inCol.map(leadCard).join('') || '<div class="kanban-empty">–</div>'}
+              ${inCol.map(l => leadCard(l, area)).join('') || '<div class="kanban-empty">–</div>'}
             </div>
           </div>`;
       }).join('')}
     </div>`;
 }
 
-function bindKanban(reload) {
+function bindKanban(reload, area) {
   let draggedId = null;
 
   document.querySelectorAll('.lead-card').forEach(card => {
@@ -271,10 +335,11 @@ function bindKanban(reload) {
       const card = document.querySelector(`.lead-card[data-lead-id="${id}"]`);
       if (card?.closest('.kanban-col')?.dataset.status === status) return;
 
-      // "Såld" är inte bara en statusändring – då ska orderraden skapas
+      // "Såld" är inte bara en statusändring – då ska ordern skapas
       if (status === 'sald') {
         const lead = await api.get(`/sales/leads/${id}`);
-        openConvertForm(lead, reload);
+        if (area.ffb) openConvertForm(lead, reload);
+        else openWorkOrderForm(lead, reload);
         return;
       }
       try {
@@ -286,19 +351,22 @@ function bindKanban(reload) {
   });
 }
 
-function tableHtml(leads) {
+function tableHtml(leads, area) {
+  const ffbHead = area.ffb
+    ? '<th>Aktivitet</th><th>Kund</th><th>Objekt</th><th>Storlek</th><th>Förfrågan</th><th>Till FFB</th><th>Från FFB</th><th>Till kund</th>'
+    : '<th>Offertnr</th><th>Kund</th><th>Beskrivning</th><th>Värde</th><th>Förfrågan</th><th>Till kund</th>';
   return `
     <div class="card">
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Aktivitet</th><th>Kund</th><th>Objekt</th><th>Storlek</th>
-            <th>Förfrågan</th><th>Till FFB</th><th>Från FFB</th><th>Till kund</th>
+            ${ffbHead}
             <th>Status</th><th>Uppföljning</th><th>E-post</th><th>Filer</th>
           </tr></thead>
           <tbody>
             ${leads.map(l => `
-              <tr class="clickable" onclick="location.hash='#/sales/${l.id}'">
+              <tr class="clickable" onclick="location.hash='#${area.route}/${l.id}'">
+                ${area.ffb ? `
                 <td>${esc(l.activity_number) || '–'}</td>
                 <td><strong>${esc(l.customer_name)}</strong></td>
                 <td>${esc(l.product_type) || '–'}</td>
@@ -306,7 +374,13 @@ function tableHtml(leads) {
                 <td>${fmtD(l.date_request)}</td>
                 <td>${fmtD(l.date_sent_ffb)}</td>
                 <td>${fmtD(l.date_back_ffb)}</td>
-                <td>${fmtD(l.date_sent_customer)}</td>
+                <td>${fmtD(l.date_sent_customer)}</td>` : `
+                <td>${esc(l.quote_number) || '–'}</td>
+                <td><strong>${esc(l.customer_name)}</strong></td>
+                <td style="max-width:280px">${esc(firstLine(l.description, 60)) || '–'}</td>
+                <td>${fmtMoney(l.estimated_value, l.currency)}</td>
+                <td>${fmtD(l.date_request)}</td>
+                <td>${fmtD(l.date_sent_customer)}</td>`}
                 <td>${salesStatusBadge(l.status)}</td>
                 <td class="${isOverdue(l) ? 'text-danger' : 'text-muted'}" style="max-width:280px">
                   ${l.next_followup_date ? `<div>${fmtD(l.next_followup_date)}</div>` : ''}
@@ -478,29 +552,42 @@ async function renderCommissionView(host) {
 export async function renderSalesLeadDetail(el, id) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
   const lead = await api.get(`/sales/leads/${id}`);
+  const ffb = lead.kind !== 'verkstad';
+  const route = ffb ? '/sales' : '/quotes';
 
   const titleEl = document.getElementById('topbar-title');
   if (titleEl) titleEl.textContent = lead.customer_name;
 
+  // En såld affär går vidare till en FFB-order respektive en arbetsorder
+  const sold = ffb
+    ? (lead.order_id
+        ? `<a href="#/sales-orders/${lead.order_id}" class="btn btn-primary btn-sm">Visa order</a>`
+        : '<button class="btn btn-primary btn-sm" id="convert-btn">Markera som såld</button>')
+    : (lead.work_order_id
+        ? `<a href="#/work-orders/${lead.work_order_id}" class="btn btn-primary btn-sm">Visa arbetsorder</a>`
+        : '<button class="btn btn-primary btn-sm" id="workorder-btn">Skapa arbetsorder</button>');
+
   const topbarActions = document.getElementById('topbar-actions');
   if (topbarActions) topbarActions.innerHTML = `
-    <a href="#/sales" class="btn btn-secondary btn-sm">← Tillbaka</a>
+    <a href="#${route}${lead.archived_at ? '?view=archive' : ''}" class="btn btn-secondary btn-sm">← Tillbaka</a>
     ${printButtons('lead-pdf')}
     <button class="btn btn-secondary btn-sm" id="edit-lead-btn">Redigera</button>
-    ${lead.order_id
-      ? `<a href="#/sales-orders/${lead.order_id}" class="btn btn-primary btn-sm">Visa order</a>`
-      : `<button class="btn btn-primary btn-sm" id="convert-btn">Markera som såld</button>`}
-    <button class="btn-icon" id="delete-lead-btn" title="Ta bort förfrågan">${TRASH_ICON}</button>`;
+    ${ffb ? '' : (lead.archived_at
+      ? '<button class="btn btn-secondary btn-sm" id="unarchive-lead-btn">Återställ</button>'
+      : '<button class="btn btn-secondary btn-sm" id="archive-lead-btn">Arkivera</button>')}
+    ${sold}
+    <button class="btn-icon" id="delete-lead-btn" title="Ta bort">${TRASH_ICON}</button>`;
 
-  const objekt = [lead.product_type, lead.size].filter(Boolean).join(' ');
+  const objekt = ffb ? [lead.product_type, lead.size].filter(Boolean).join(' ') : '';
 
   el.innerHTML = `
     <div style="margin-bottom:20px">
       <div class="page-title">${esc(lead.customer_name)} ${salesStatusBadge(lead.status)}</div>
       <div class="page-subtitle">
-        ${objekt ? esc(objekt) : 'Ingen objekttyp angiven'}
-        ${lead.activity_number ? ` · Aktivitet #${esc(lead.activity_number)}` : ''}
+        ${ffb ? (objekt || 'Ingen objekttyp angiven') : 'Verkstadsoffert'}
+        ${ffb && lead.activity_number ? ` · Aktivitet #${esc(lead.activity_number)}` : ''}
         ${lead.quote_number ? ` · Offert ${esc(lead.quote_number)}` : ''}
+        ${lead.archived_at ? ' · ARKIVERAD' : ''}
       </div>
     </div>
 
@@ -510,17 +597,26 @@ export async function renderSalesLeadDetail(el, id) {
       <div>
         ${customerCardHtml(lead)}
 
+        ${lead.description ? `
         <div class="card" style="margin-bottom:16px">
-          <div class="card-header"><span class="card-title">Förfrågan</span></div>
+          <div class="card-header"><span class="card-title">Beskrivning</span></div>
           <div class="card-body">
-            ${metaRow('Objekt', objekt)}
-            ${metaRow('Antal', lead.quantity > 1 ? `${lead.quantity} st` : '')}
+            <p style="font-size:13.5px;white-space:pre-wrap;margin:0">${esc(lead.description)}</p>
+          </div>
+        </div>` : ''}
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><span class="card-title">${ffb ? 'Förfrågan' : 'Offert'}</span></div>
+          <div class="card-body">
+            ${ffb ? metaRow('Objekt', objekt) : ''}
+            ${ffb ? metaRow('Antal', lead.quantity > 1 ? `${lead.quantity} st` : '') : ''}
             ${metaRow('Offertnummer', lead.quote_number)}
             ${metaRow('Uppskattat värde', lead.estimated_value ? fmtMoney(lead.estimated_value, lead.currency) : '')}
             ${metaRow('Ansvarig', lead.assignee_name)}
             ${metaRow('Nästa uppföljning', lead.next_followup_date ? fmtD(lead.next_followup_date) : '')}
             ${metaRow('Avslutsorsak', lead.lost_reason)}
-            ${lead.external_link ? metaRow('Extern länk', lead.external_link) : ''}
+            ${metaRow('Arbetsorder', lead.work_order_number)}
+            ${ffb && lead.external_link ? metaRow('Extern länk', lead.external_link) : ''}
             ${lead.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2);white-space:pre-wrap">${esc(lead.notes)}</p>` : ''}
           </div>
         </div>
@@ -529,8 +625,8 @@ export async function renderSalesLeadDetail(el, id) {
           <div class="card-header"><span class="card-title">Tidslinje</span></div>
           <div class="card-body">
             ${stepRow('Förfrågan inkom', lead.date_request)}
-            ${stepRow('Skickad till FFB', lead.date_sent_ffb)}
-            ${stepRow('Tillbaka från FFB', lead.date_back_ffb)}
+            ${ffb ? stepRow('Skickad till FFB', lead.date_sent_ffb) : ''}
+            ${ffb ? stepRow('Tillbaka från FFB', lead.date_back_ffb) : ''}
             ${stepRow('Offert skickad till kund', lead.date_sent_customer)}
           </div>
         </div>
@@ -558,21 +654,41 @@ export async function renderSalesLeadDetail(el, id) {
 
   document.getElementById('edit-lead-btn')?.addEventListener('click', () => openLeadForm(lead, reload));
   document.getElementById('convert-btn')?.addEventListener('click', () => openConvertForm(lead, reload));
-  bindPrintButtons('lead-pdf', `${base}/pdf`, `forfragan-${id}.pdf`);
+  document.getElementById('workorder-btn')?.addEventListener('click', () => openWorkOrderForm(lead, reload));
+  bindPrintButtons('lead-pdf', `${base}/pdf`, `${ffb ? 'forfragan' : 'offert'}-${id}.pdf`);
+
+  document.getElementById('archive-lead-btn')?.addEventListener('click', async () => {
+    try {
+      await api.post(`${base}/archive`, {});
+      showToast('Offerten arkiverad', 'success');
+      reload();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+  document.getElementById('unarchive-lead-btn')?.addEventListener('click', async () => {
+    try {
+      await api.post(`${base}/unarchive`, {});
+      showToast('Offerten återställd', 'success');
+      reload();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
 
   document.getElementById('delete-lead-btn')?.addEventListener('click', async () => {
     // Ordern som skapats ur förfrågan tas bort samtidigt – säg det rakt ut
-    const extra = lead.order_id
-      ? ` Även den sålda ordern <strong>${esc(lead.order_number || `#${lead.order_id}`)}</strong>`
-        + ' med dess milstolpar, AOC och filer tas bort.'
-      : '';
+    let extra = '';
+    if (lead.order_id) {
+      extra = ` Även den sålda ordern <strong>${esc(lead.order_number || `#${lead.order_id}`)}</strong>`
+        + ' med dess milstolpar, AOC och filer tas bort.';
+    } else if (lead.work_order_id) {
+      // Arbetsordern lever vidare på egen hand – den raderas där, inte härifrån
+      extra = ` Arbetsordern <strong>${esc(lead.work_order_number || '')}</strong> påverkas inte.`;
+    }
     if (!await confirmDialog(
-      `Ta bort förfrågan för <strong>${esc(lead.customer_name)}</strong>?${extra} Detta kan inte ångras.`
+      `Ta bort ${ffb ? 'förfrågan' : 'offerten'} för <strong>${esc(lead.customer_name)}</strong>?${extra} Detta kan inte ångras.`
     )) return;
     try {
       await api.delete(base);
-      showToast('Förfrågan borttagen', 'success');
-      location.hash = '#/sales';
+      showToast(ffb ? 'Förfrågan borttagen' : 'Offert borttagen', 'success');
+      location.hash = `#${route}`;
     } catch (err) { showToast(err.message, 'error'); }
   });
 
@@ -897,15 +1013,18 @@ function openNoteForm(base, kind, onSaved, { withFollowup = false } = {}) {
 
 // ── Formulär: förfrågan ───────────────────────────────────────────────────────
 
-export async function openLeadForm(lead, onSaved) {
+export async function openLeadForm(lead, onSaved, area = null) {
+  // Vid redigering styr postens egen typ; vid nyskapande den vy man står i
+  const ffb = lead ? lead.kind !== 'verkstad' : (area ? area.ffb : true);
+  const currency = lead?.currency || (ffb ? 'EUR' : 'SEK');
   const [customers, users, types] = await Promise.all([
     api.get('/customers'),
     api.get('/users').catch(() => []),
-    productTypes(),
+    ffb ? productTypes() : Promise.resolve([]),
   ]);
 
   openModal({
-    title: lead ? 'Redigera förfrågan' : 'Ny offertförfrågan',
+    title: lead ? (ffb ? 'Redigera förfrågan' : 'Redigera offert') : (ffb ? 'Ny offertförfrågan' : 'Ny offert'),
     size: 'modal-lg',
     body: `
       <form id="lead-form">
@@ -926,7 +1045,13 @@ export async function openLeadForm(lead, onSaved) {
           </div>
         </div>
 
-        <div class="form-row">
+        <div class="field">
+          <label>Beskrivning${ffb ? '' : ' *'}</label>
+          <textarea name="description" rows="3" ${ffb ? '' : 'required'}
+                    placeholder="${ffb ? 'Vad gäller förfrågan?' : 'Vilket arbete ska utföras? Följer med till arbetsordern.'}">${esc(lead?.description)}</textarea>
+        </div>
+
+        <div class="form-row" ${ffb ? '' : 'style="display:none"'}>
           <div class="field"><label>Aktivitetsnr</label><input type="text" name="activity_number" value="${esc(lead?.activity_number)}"></div>
           <div class="field">
             <label>Objekt</label>
@@ -950,13 +1075,13 @@ export async function openLeadForm(lead, onSaved) {
           </div>
           <div class="field"><label>Offertnummer</label><input type="text" name="quote_number" value="${esc(lead?.quote_number)}"></div>
           <div class="field"><label>Uppskattat värde</label><input type="number" step="0.01" name="estimated_value" value="${lead?.estimated_value ?? ''}"></div>
-          <div class="field"><label>Valuta</label><input type="text" name="currency" value="${esc(lead?.currency || 'EUR')}"></div>
+          <div class="field"><label>Valuta</label><input type="text" name="currency" value="${esc(currency)}"></div>
         </div>
 
         <div class="form-row">
           <div class="field"><label>Datum förfrågan</label><input type="date" name="date_request" value="${lead?.date_request || todayISO()}"></div>
-          <div class="field"><label>Skickad till FFB</label><input type="date" name="date_sent_ffb" value="${lead?.date_sent_ffb || ''}"></div>
-          <div class="field"><label>Tillbaka från FFB</label><input type="date" name="date_back_ffb" value="${lead?.date_back_ffb || ''}"></div>
+          <div class="field" ${ffb ? '' : 'style="display:none"'}><label>Skickad till FFB</label><input type="date" name="date_sent_ffb" value="${lead?.date_sent_ffb || ''}"></div>
+          <div class="field" ${ffb ? '' : 'style="display:none"'}><label>Tillbaka från FFB</label><input type="date" name="date_back_ffb" value="${lead?.date_back_ffb || ''}"></div>
           <div class="field"><label>Skickad till kund</label><input type="date" name="date_sent_customer" value="${lead?.date_sent_customer || ''}"></div>
         </div>
 
@@ -972,12 +1097,12 @@ export async function openLeadForm(lead, onSaved) {
           <div class="field"><label>Avslutsorsak</label><input type="text" name="lost_reason" value="${esc(lead?.lost_reason)}"></div>
         </div>
 
-        <div class="field"><label>Extern länk (gammal filserversökväg)</label><input type="text" name="external_link" value="${esc(lead?.external_link)}"></div>
-        <div class="field"><label>Anteckningar</label><textarea name="notes" rows="3">${esc(lead?.notes)}</textarea></div>
+        <div class="field" ${ffb ? '' : 'style="display:none"'}><label>Extern länk (gammal filserversökväg)</label><input type="text" name="external_link" value="${esc(lead?.external_link)}"></div>
+        <div class="field"><label>Interna anteckningar</label><textarea name="notes" rows="3">${esc(lead?.notes)}</textarea></div>
 
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
-          <button type="submit" class="btn btn-primary">${lead ? 'Spara' : 'Skapa förfrågan'}</button>
+          <button type="submit" class="btn btn-primary">${lead ? 'Spara' : (ffb ? 'Skapa förfrågan' : 'Skapa offert')}</button>
         </div>
       </form>`,
   });
@@ -1009,7 +1134,7 @@ export async function openLeadForm(lead, onSaved) {
     openCustomerForm(null, async () => {
       const fresh = await api.get('/customers');
       const newest = fresh.reduce((a, b) => (a.id > b.id ? a : b), fresh[0]);
-      await openLeadForm({ ...(lead || {}), ...draft, customer_id: newest?.id, id: lead?.id }, onSaved);
+      await openLeadForm({ ...(lead || {}), ...draft, customer_id: newest?.id, id: lead?.id }, onSaved, area);
     });
   });
 
@@ -1028,6 +1153,8 @@ export async function openLeadForm(lead, onSaved) {
     e.preventDefault();
     const body = collectLeadForm();
     if (!body.customer_id) { showToast('Välj en kund', 'error'); return; }
+    // Affärstypen sätts vid skapandet och byts inte i efterhand
+    if (!lead?.id) body.kind = ffb ? 'feldbinder' : 'verkstad';
     try {
       if (lead?.id) {
         await api.put(`/sales/leads/${lead.id}`, body);
@@ -1077,6 +1204,61 @@ function openConvertForm(lead, onSaved) {
       showToast('Order skapad', 'success');
       closeModal();
       location.hash = `#/sales-orders/${order.id}`;
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+
+/** En såld verkstadsoffert blir en arbetsorder istället för en FFB-order. */
+async function openWorkOrderForm(lead, onSaved) {
+  const users = await api.get('/users').catch(() => []);
+  openModal({
+    title: 'Skapa arbetsorder',
+    body: `
+      <form id="workorder-form">
+        <p style="margin-bottom:16px;color:var(--text-2);font-size:13px">
+          Offerten markeras som såld och en arbetsorder skapas på
+          <strong>${esc(lead.customer_name)}</strong>.
+        </p>
+        <div class="form-row">
+          <div class="field">
+            <label>Ordernummer</label>
+            <input type="text" name="order_number" placeholder="Lämna tomt för automatiskt">
+          </div>
+          <div class="field"><label>Planerad start</label><input type="date" name="scheduled_date"></div>
+        </div>
+        <div class="field">
+          <label>Beskrivning *</label>
+          <textarea name="description" rows="4" required>${esc(lead.description || lead.notes)}</textarea>
+        </div>
+        <div class="field">
+          <label>Tilldelad</label>
+          <select name="assigned_to">
+            <option value="">–</option>
+            ${users.map(u => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">Skapa arbetsorder</button>
+        </div>
+      </form>`,
+  });
+
+  document.getElementById('workorder-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {};
+    for (const [k, v] of fd.entries()) body[k] = v === '' ? null : v;
+    if (body.assigned_to) body.assigned_to = Number(body.assigned_to);
+    // Backend vill ha en tidsstämpel, datumfältet ger bara ett datum
+    if (body.scheduled_date) body.scheduled_date = `${body.scheduled_date}T08:00:00`;
+    try {
+      const wo = await api.post(`/sales/leads/${lead.id}/convert-to-work-order`, body);
+      showToast(`Arbetsorder ${wo.order_number} skapad`, 'success');
+      closeModal();
+      location.hash = `#/work-orders/${wo.id}`;
       onSaved?.();
     } catch (err) { showToast(err.message, 'error'); }
   });

@@ -1,5 +1,5 @@
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
@@ -10,20 +10,21 @@ from sqlalchemy.orm import Session, joinedload
 from ..database import get_db
 from ..deps import require_admin
 from ..models import (
-    SalesLead, SalesLeadNote, SalesLeadFile, SalesLeadStatus, SalesActivity,
-    SalesOrder, SalesOrderFile, SalesMilestoneDef, SalesOrderMilestone,
-    Customer, ContactPerson, User,
+    SalesLead, SalesLeadNote, SalesLeadFile, SalesLeadStatus, SalesLeadKind,
+    SalesActivity, SalesOrder, SalesOrderFile, SalesMilestoneDef, SalesOrderMilestone,
+    Customer, ContactPerson, WorkOrder, WorkOrderStatus, Settings, User,
 )
 from ..schemas import (
     SalesLeadCreate, SalesLeadUpdate, SalesLeadOut, SalesLeadListItem,
     SalesLeadNoteCreate, SalesLeadNoteOut, SalesLeadFileOut,
-    SalesLeadConvert, SalesOrderOut, SalesPipelineStats,
+    SalesLeadConvert, SalesLeadToWorkOrder, SalesOrderOut, SalesPipelineStats,
     SalesActivityCreate, SalesActivityUpdate, SalesActivityOut, SalesScheduleItem,
 )
 from ..sales_common import contact_fields, activity_out, lead_schedule, next_activity_sort
 from ..sales_pdf import build_lead_pdf
 from ..uploads import store_file, file_path, remove_file
 from .sales_orders import order_out, UPLOAD_ROOT as ORDER_UPLOAD_ROOT
+from .work_orders import _next_order_number
 
 router = APIRouter(prefix="/api/sales/leads", tags=["sales-leads"])
 
@@ -45,6 +46,7 @@ def _get(db: Session, lead_id: int) -> SalesLead:
             joinedload(SalesLead.lead_notes).joinedload(SalesLeadNote.creator),
             joinedload(SalesLead.files),
             joinedload(SalesLead.activities),
+            joinedload(SalesLead.work_order),
         )
         .filter(SalesLead.id == lead_id)
         .first()
@@ -60,6 +62,8 @@ def _base_fields(lead: SalesLead) -> dict:
     latest = notes[0] if notes else None
     return dict(
         id=lead.id,
+        kind=lead.kind,
+        description=lead.description,
         activity_number=lead.activity_number,
         customer_id=lead.customer_id,
         # Kunduppgifterna visas likadant på förfrågan och på order
@@ -112,6 +116,9 @@ def _out(db: Session, lead: SalesLead) -> SalesLeadOut:
         updated_at=lead.updated_at,
         order_id=order[0] if order else None,
         order_number=order[1] if order else None,
+        work_order_id=lead.work_order_id,
+        work_order_number=lead.work_order.order_number if lead.work_order else None,
+        archived_at=lead.archived_at,
         lead_notes=[_note_out(n) for n in notes],
         files=[SalesLeadFileOut.model_validate(f) for f in lead.files],
         activities=[activity_out(a) for a in lead.activities],
@@ -135,11 +142,14 @@ def _validate_refs(db: Session, customer_id: Optional[int], contact_person_id: O
 def list_leads(
     q: Optional[str] = None,
     status_filter: Optional[SalesLeadStatus] = Query(None, alias="status"),
+    kind: Optional[SalesLeadKind] = None,
     customer_id: Optional[int] = None,
+    archived: bool = False,
     followup: Optional[str] = Query(None, description="'overdue' = uppföljningsdatum har passerat"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    """Utan ?kind= kommer båda sorterna med. Arkiverade göms som standard."""
     query = (
         db.query(SalesLead)
         .join(Customer, SalesLead.customer_id == Customer.id)
@@ -150,7 +160,10 @@ def list_leads(
             joinedload(SalesLead.lead_notes),
             joinedload(SalesLead.files),
         )
+        .filter(SalesLead.archived_at.isnot(None) if archived else SalesLead.archived_at.is_(None))
     )
+    if kind:
+        query = query.filter(SalesLead.kind == kind)
     if q:
         like = f"%{q}%"
         query = query.filter(or_(
@@ -173,28 +186,35 @@ def list_leads(
 
 
 @router.get("/stats", response_model=SalesPipelineStats)
-def pipeline_stats(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def pipeline_stats(
+    kind: Optional[SalesLeadKind] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    def scoped(query):
+        query = query.filter(SalesLead.archived_at.is_(None))
+        return query.filter(SalesLead.kind == kind) if kind else query
+
     counts = dict(
-        db.query(SalesLead.status, func.count(SalesLead.id)).group_by(SalesLead.status).all()
+        scoped(db.query(SalesLead.status, func.count(SalesLead.id)))
+        .group_by(SalesLead.status).all()
     )
-    open_value = (
+    open_value = scoped(
         db.query(func.coalesce(func.sum(SalesLead.estimated_value), 0))
         .filter(SalesLead.status.in_(OPEN_STATUSES))
-        .scalar()
-    )
-    overdue = (
-        db.query(func.count(SalesLead.id))
-        .filter(
+    ).scalar()
+    overdue = scoped(
+        db.query(func.count(SalesLead.id)).filter(
             SalesLead.next_followup_date <= date.today(),
             SalesLead.status.in_(OPEN_STATUSES),
         )
-        .scalar()
-    )
+    ).scalar()
     return SalesPipelineStats(
         by_status={s.value: counts.get(s, 0) for s in SalesLeadStatus},
         open_leads=sum(counts.get(s, 0) for s in OPEN_STATUSES),
         overdue_followups=overdue or 0,
         open_value=open_value or 0,
+        currency="SEK" if kind == SalesLeadKind.verkstad else "EUR",
     )
 
 
@@ -209,6 +229,9 @@ def create_lead(
     # Förfrågningsdatumet är alltid ifyllt i Excel – sätt dagens om det utelämnas
     if not data.get("date_request"):
         data["date_request"] = date.today()
+    # Verkstadsjobb offereras i kronor, Feldbinder-affärer i euro
+    if data.get("kind") == SalesLeadKind.verkstad and not body.model_fields_set & {"currency"}:
+        data["currency"] = "SEK"
     lead = SalesLead(**data, created_by=current_user.id)
     db.add(lead)
     db.commit()
@@ -468,6 +491,11 @@ def convert_to_order(
     """Markerar förfrågan som såld och skapar orderraden – motsvarar flytten från
     fliken "Offertförfrågan Lista" till årsfliken i kundens Excel."""
     lead = _get(db, lead_id)
+    if lead.kind != SalesLeadKind.feldbinder:
+        raise HTTPException(
+            status_code=400,
+            detail="Verkstadsofferter blir en arbetsorder – använd convert-to-work-order",
+        )
     if db.query(SalesOrder.id).filter(SalesOrder.lead_id == lead_id).first():
         raise HTTPException(status_code=400, detail="Förfrågan är redan konverterad till order")
 
@@ -493,3 +521,83 @@ def convert_to_order(
     lead.next_followup_date = None
     db.commit()
     return order_out(db, order.id)
+
+
+# ── Arkivering ────────────────────────────────────────────────────────────────
+
+@router.post("/{lead_id}/archive", response_model=SalesLeadOut)
+def archive_lead(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """Lägger undan förfrågan utan att radera den. Används av Offerter-arkivet."""
+    lead = _get(db, lead_id)
+    if lead.archived_at is None:
+        lead.archived_at = datetime.utcnow()
+        db.commit()
+    return _out(db, _get(db, lead_id))
+
+
+@router.post("/{lead_id}/unarchive", response_model=SalesLeadOut)
+def unarchive_lead(lead_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    lead = _get(db, lead_id)
+    lead.archived_at = None
+    db.commit()
+    return _out(db, _get(db, lead_id))
+
+
+# ── Verkstadsoffert blir arbetsorder ──────────────────────────────────────────
+
+@router.post("/{lead_id}/convert-to-work-order", status_code=status.HTTP_201_CREATED)
+def convert_to_work_order(
+    lead_id: int,
+    body: SalesLeadToWorkOrder = SalesLeadToWorkOrder(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """En såld verkstadsoffert blir en arbetsorder istället för en FFB-order.
+    Returnerar den skapade arbetsordern så att gränssnittet kan hoppa dit."""
+    lead = _get(db, lead_id)
+    if lead.kind != SalesLeadKind.verkstad:
+        raise HTTPException(
+            status_code=400,
+            detail="Bara verkstadsofferter blir arbetsorder – Feldbinder-affärer blir en såld order",
+        )
+    if lead.work_order_id:
+        raise HTTPException(status_code=400, detail="Offerten har redan en arbetsorder")
+
+    description = body.description or lead.description or lead.notes
+    if not description:
+        raise HTTPException(
+            status_code=400,
+            detail="Arbetsordern behöver en beskrivning – fyll i beskrivningen på offerten först",
+        )
+
+    # Samma numrering som när en arbetsorder skapas manuellt: automatiskt om inte
+    # inställningen står på manuell numrering.
+    mode = db.get(Settings, "order_number_mode")
+    order_number = body.order_number
+    if not order_number:
+        if mode and mode.value == "manual":
+            raise HTTPException(status_code=400, detail="Ange ordernummer – manuell numrering är vald")
+        order_number = _next_order_number(db)
+    if db.query(WorkOrder).filter(WorkOrder.order_number == order_number).first():
+        raise HTTPException(status_code=400, detail=f"Ordernummer {order_number} används redan")
+
+    wo = WorkOrder(
+        order_number=order_number,
+        customer_id=lead.customer_id,
+        contact_person_id=lead.contact_person_id,
+        vehicle_id=body.vehicle_id,
+        description=description,
+        status=WorkOrderStatus.ny,
+        assigned_to=body.assigned_to,
+        scheduled_date=body.scheduled_date,
+        created_by=current_user.id,
+    )
+    db.add(wo)
+    db.flush()
+
+    lead.work_order_id = wo.id
+    lead.status = SalesLeadStatus.sald
+    lead.next_followup_date = None
+    db.commit()
+    db.refresh(wo)
+    return {"id": wo.id, "order_number": wo.order_number}

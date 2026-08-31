@@ -326,6 +326,16 @@ def _run_migrations():
         )""",
         "CREATE INDEX IF NOT EXISTS ix_sales_activities_lead ON sales_activities (lead_id)",
         "CREATE INDEX IF NOT EXISTS ix_sales_activities_order ON sales_activities (order_id)",
+        # ── Två sorters förfrågningar ─────────────────────────────────────────
+        # Feldbinder-affärer (hela FFB-kedjan) och verkstadsofferter, som istället
+        # blir en arbetsorder när de säljs. Befintliga rader är feldbinder.
+        "DO $$ BEGIN CREATE TYPE salesleadkind AS ENUM ('feldbinder','verkstad'); EXCEPTION WHEN duplicate_object THEN null; END $$",
+        "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS kind salesleadkind NOT NULL DEFAULT 'feldbinder'",
+        "CREATE INDEX IF NOT EXISTS ix_sales_leads_kind ON sales_leads (kind)",
+        "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS description TEXT",
+        "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL",
+        "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP",
+        "CREATE INDEX IF NOT EXISTS ix_sales_leads_archived_at ON sales_leads (archived_at)",
     ]
     with engine.connect() as conn:
         for stmt in stmts:

@@ -11,7 +11,7 @@ import { renderCalendar } from './pages/calendar.js';
 import { renderUsers } from './pages/users.js';
 import { renderSettings } from './pages/settings.js';
 import { renderPickLists } from './pages/pick-lists.js';
-import { renderSales, renderSalesLeadDetail, renderSalesOrderDetail } from './pages/sales.js';
+import { renderSales, renderQuotes, renderSalesLeadDetail, renderSalesOrderDetail } from './pages/sales.js';
 
 // index.html laddar den här filen som app.js?v=N för cachebrytning, medan
 // sidmodulerna importerar '../app.js' för fmtDate/statusBadge. Det är två olika
@@ -80,8 +80,9 @@ const PAGE_TITLES = {
   '/scanner':      'Scanner',
   '/articles':     'Artiklar',
   '/pick-lists':   'Plocklistor',
-  '/sales':        'Försäljning',
-  '/sales-orders': 'Försäljning',
+  '/sales':        'Feldbinder',
+  '/sales-orders': 'Feldbinder',
+  '/quotes':       'Offerter',
   '/time-entries': 'Tidrapportering',
   '/calendar':     'Kalender',
   '/users':        'Användare',
@@ -135,6 +136,7 @@ async function route() {
       if (base === '/customers')   return await renderCustomerDetail(content, parseInt(id));
       if (base === '/vehicles')    return await renderVehicleDetail(content, parseInt(id));
       if (base === '/sales')        return await renderSalesLeadDetail(content, parseInt(id));
+      if (base === '/quotes')       return await renderSalesLeadDetail(content, parseInt(id));
       if (base === '/sales-orders') return await renderSalesOrderDetail(content, parseInt(id));
     }
 
@@ -150,6 +152,7 @@ async function route() {
       '/articles':      renderArticles,
       '/pick-lists':    renderPickLists,
       '/sales':         renderSales,
+      '/quotes':        renderQuotes,
       '/scanner':       renderScanner,
       '/time-entries':  renderTimeEntries,
       '/calendar':      renderCalendar,

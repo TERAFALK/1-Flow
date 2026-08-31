@@ -2,7 +2,7 @@
 aktiviteter och uppbyggnaden av Gantt-schemat."""
 from typing import List, Optional
 
-from .models import SalesActivity, SalesLead, SalesOrder
+from .models import SalesActivity, SalesLead, SalesLeadKind, SalesOrder
 from .schemas import SalesActivityOut, SalesScheduleItem
 
 # Färgerna följer avsnitten i ordervyn så att stapeln går att känna igen
@@ -52,11 +52,13 @@ def _item(name: str, start, end=None, color: str = DEFAULT_COLOR) -> Optional[Sa
 
 def lead_schedule(lead: SalesLead) -> List[SalesScheduleItem]:
     """Automatiska poster ur förfrågans datumfält, plus egna aktiviteter."""
-    items = [
-        _item("Förfrågan inkom", lead.date_request, color="#2563eb"),
+    items = [_item("Förfrågan inkom", lead.date_request, color="#2563eb")]
+    if lead.kind == SalesLeadKind.feldbinder:
         # Tiden hos FFB är den enda riktiga varaktigheten i förfrågan – resten är
-        # händelser på en dag och ritas som endagsstaplar.
-        _item("Hos FFB", lead.date_sent_ffb, lead.date_back_ffb, color="#7c3aed"),
+        # händelser på en dag och ritas som endagsstaplar. Verkstadsofferter går
+        # aldrig via FFB och har därför inte steget.
+        items.append(_item("Hos FFB", lead.date_sent_ffb, lead.date_back_ffb, color="#7c3aed"))
+    items += [
         _item("Offert till kund", lead.date_sent_customer, color="#16a34a"),
         _item("Uppföljning", lead.next_followup_date, color="#d97706"),
     ]

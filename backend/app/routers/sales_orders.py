@@ -19,7 +19,7 @@ from ..schemas import (
     SalesOrderMilestoneOut, SalesOrderMilestoneUpdate,
     SalesOrderAocCreate, SalesOrderAocUpdate, SalesOrderAocOut, SalesOrderFileOut,
     SalesCommissionRow, SalesCommissionSummary,
-    SalesLeadNoteCreate, SalesLeadNoteOut,
+    SalesLeadNoteCreate, SalesLeadNoteOut, SalesLeadFileOut,
     SalesActivityCreate, SalesActivityUpdate, SalesActivityOut, SalesScheduleItem,
 )
 from ..sales_common import contact_fields, activity_out, order_schedule, next_activity_sort
@@ -137,6 +137,7 @@ def _note_out(note: SalesLeadNote, from_lead: bool = False) -> SalesLeadNoteOut:
         created_at=note.created_at,
         created_by_name=note.creator.full_name if note.creator else None,
         from_lead=from_lead,
+        files=[SalesLeadFileOut.model_validate(f) for f in note.files],
     )
 
 

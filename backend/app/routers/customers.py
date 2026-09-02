@@ -6,7 +6,7 @@ from ..database import get_db
 from ..deps import get_current_user, require_admin
 from ..schemas import (
     CustomerCreate, CustomerUpdate, CustomerOut,
-    SalesLeadNoteCreate, SalesLeadNoteOut, TaskCreate, TaskOut,
+    SalesLeadNoteCreate, SalesLeadNoteOut, SalesLeadFileOut, TaskCreate, TaskOut,
 )
 from .. import models
 
@@ -110,6 +110,7 @@ def _note_out(note, source_label=None, source_link=None) -> SalesLeadNoteOut:
         created_by_name=note.creator.full_name if note.creator else None,
         source_label=source_label,
         source_link=source_link,
+        files=[SalesLeadFileOut.model_validate(f) for f in note.files],
     )
 
 

@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+import { api, uploadFile, downloadFile } from '../api.js';
 import { openModal, closeModal, confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
 
@@ -63,8 +63,71 @@ export function notesHtml(notes) {
             </button>`}
           </div>
           <div class="timeline-body">${esc(n.body)}</div>
+          ${noteFilesHtml(n)}
         </div>`).join('')}
     </div>`;
+}
+
+const isImage = (f) => (f.mime_type || '').startsWith('image/');
+
+/** Bilagor på en enskild anteckning – mailet och korten som kom in i samband
+ *  med kontakten. Bilder visas som kort, övrigt som en rad med filnamnet. */
+function noteFilesHtml(n) {
+  const files = n.files || [];
+  const photos = files.filter(isImage);
+  const docs = files.filter(f => !isImage(f));
+  // Ärvda anteckningar redigeras där de hör hemma – ingen uppladdning här
+  const canEdit = !isInherited(n);
+  if (!files.length && !canEdit) return '';
+
+  return `
+    <div class="note-files">
+      ${photos.length ? `
+        <div class="photo-grid note-photos">
+          ${photos.map(f => `
+            <div class="photo-thumb" data-note-photo="${n.id}:${f.id}">
+              <img data-src="/api/notes/${n.id}/files/${f.id}/download" alt="${esc(f.original_name)}">
+              ${canEdit ? `<button class="photo-delete" data-del-note-file="${n.id}:${f.id}" title="Ta bort">×</button>` : ''}
+              <div class="photo-name">${esc(f.original_name)}</div>
+            </div>`).join('')}
+        </div>` : ''}
+      ${docs.map(f => `
+        <div class="note-file">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:12px;height:12px;flex:none;opacity:.5">
+            <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/>
+          </svg>
+          <button type="button" class="link-btn" data-dl-note-file="${n.id}:${f.id}" data-name="${esc(f.original_name)}">${esc(f.original_name)}</button>
+          <span class="text-muted" style="font-size:11px">${f.size_bytes ? `${Math.round(f.size_bytes / 1024)} kB` : ''}</span>
+          ${canEdit ? `<button type="button" class="btn-icon" title="Ta bort" data-del-note-file="${n.id}:${f.id}">${TRASH_ICON}</button>` : ''}
+        </div>`).join('')}
+      ${canEdit ? `
+        <label class="note-attach">
+          + Bifoga fil
+          <input type="file" multiple data-note-upload="${n.id}" style="display:none">
+        </label>` : ''}
+    </div>`;
+}
+
+/** Miniatyrerna kräver token, därav data-src istället för src. */
+function loadNoteThumbs(root = document) {
+  root.querySelectorAll('.note-photos img[data-src]').forEach(async (img) => {
+    try {
+      const token = localStorage.getItem('flow_token');
+      const resp = await fetch(img.dataset.src, { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) return;
+      img.src = URL.createObjectURL(await resp.blob());
+    } catch { /* en trasig miniatyr ska inte störa resten */ }
+  });
+}
+
+async function uploadNoteFiles(noteId, files) {
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      await uploadFile(`/notes/${noteId}/files`, fd);
+    } catch (err) { showToast(`${file.name}: ${err.message}`, 'error'); }
+  }
 }
 
 /**
@@ -78,7 +141,7 @@ export function bindNotes(base, reload, { withFollowup = false } = {}) {
   });
   document.querySelectorAll('[data-del-note]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!await confirmDialog('Ta bort anteckningen?')) return;
+      if (!await confirmDialog('Ta bort anteckningen? Bifogade filer tas bort med den.')) return;
       try {
         await api.delete(`${base}/notes/${btn.dataset.delNote}`);
         showToast('Anteckning borttagen', 'success');
@@ -86,6 +149,57 @@ export function bindNotes(base, reload, { withFollowup = false } = {}) {
       } catch (err) { showToast(err.message, 'error'); }
     });
   });
+
+  bindNoteFiles(reload);
+}
+
+/** Bilagorna går mot /api/notes/{id}/files – samma rutt oavsett om anteckningen
+ *  sitter på en kund, en förfrågan eller en order. */
+function bindNoteFiles(reload) {
+  document.querySelectorAll('[data-note-upload]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const chosen = [...(input.files || [])];
+      if (!chosen.length) return;
+      await uploadNoteFiles(input.dataset.noteUpload, chosen);
+      showToast(chosen.length > 1 ? `${chosen.length} filer bifogade` : 'Fil bifogad', 'success');
+      reload();
+    });
+  });
+
+  document.querySelectorAll('[data-dl-note-file]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const [noteId, fileId] = btn.dataset.dlNoteFile.split(':');
+      try { await downloadFile(`/notes/${noteId}/files/${fileId}/download`, btn.dataset.name); }
+      catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+
+  document.querySelectorAll('[data-del-note-file]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!await confirmDialog('Ta bort filen?')) return;
+      const [noteId, fileId] = btn.dataset.delNoteFile.split(':');
+      try {
+        await api.delete(`/notes/${noteId}/files/${fileId}`);
+        showToast('Fil borttagen', 'success');
+        reload();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+  });
+
+  document.querySelectorAll('[data-note-photo]').forEach(thumb => {
+    thumb.addEventListener('click', () => {
+      const img = thumb.querySelector('img');
+      if (!img?.src) return;
+      openModal({
+        title: thumb.querySelector('.photo-name')?.textContent || '',
+        size: 'modal-lg',
+        body: `<img src="${img.src}" style="max-width:100%;max-height:70vh;display:block;margin:0 auto">`,
+      });
+    });
+  });
+
+  loadNoteThumbs();
 }
 
 export function openNoteForm(base, kind, onSaved, { withFollowup = false } = {}) {
@@ -98,6 +212,10 @@ export function openNoteForm(base, kind, onSaved, { withFollowup = false } = {})
           ${withFollowup ? '<div class="field"><label>Nästa uppföljning</label><input type="date" name="next_followup_date"></div>' : ''}
         </div>
         <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus></textarea></div>
+        <div class="field">
+          <label>Bifoga filer eller kort</label>
+          <input type="file" name="files" multiple>
+        </div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
           <button type="submit" class="btn btn-primary">Spara</button>
@@ -109,11 +227,14 @@ export function openNoteForm(base, kind, onSaved, { withFollowup = false } = {})
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      await api.post(`${base}/notes`, {
+      const note = await api.post(`${base}/notes`, {
         kind,
         note_date: fd.get('note_date') || null,
         body: fd.get('body'),
       });
+      // Filerna kan först laddas upp när anteckningen har fått ett id
+      const chosen = [...(e.target.files?.files || [])];
+      if (chosen.length) await uploadNoteFiles(note.id, chosen);
       // Uppföljningsdatumet ligger på förfrågan, inte på anteckningen – spara det separat
       if (withFollowup && fd.get('next_followup_date')) {
         await api.put(base, { next_followup_date: fd.get('next_followup_date') });

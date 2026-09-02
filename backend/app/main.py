@@ -10,7 +10,7 @@ from .routers import (
     auth, users, customers, vehicles, articles,
     work_orders, time_entries, dashboard,
     settings, contacts, phases, purchases, files, activities, tasks,
-    pick_lists, sales_leads, sales_orders, sales_milestones,
+    pick_lists, sales_leads, sales_orders, sales_milestones, note_files,
 )
 
 models.Base.metadata.create_all(bind=engine)
@@ -344,6 +344,11 @@ def _run_migrations():
         "CREATE INDEX IF NOT EXISTS ix_tasks_customer_id ON tasks (customer_id)",
         "ALTER TABLE sales_lead_notes ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE",
         "CREATE INDEX IF NOT EXISTS ix_sales_lead_notes_customer_id ON sales_lead_notes (customer_id)",
+        # Bilagor kan nu hänga på en enskild anteckning – mailet och korten som kom
+        # in i samband med kontakten sparas per aktivitet istället för i en hög.
+        "ALTER TABLE sales_lead_files ADD COLUMN IF NOT EXISTS note_id INTEGER REFERENCES sales_lead_notes(id) ON DELETE CASCADE",
+        "ALTER TABLE sales_lead_files ALTER COLUMN lead_id DROP NOT NULL",
+        "CREATE INDEX IF NOT EXISTS ix_sales_lead_files_note_id ON sales_lead_files (note_id)",
         # Uppgifter kan nu ligga på en offert och flyttas till arbetsordern vid försäljning
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lead_id INTEGER REFERENCES sales_leads(id) ON DELETE CASCADE",
         "ALTER TABLE tasks ALTER COLUMN work_order_id DROP NOT NULL",
@@ -468,6 +473,7 @@ app.include_router(files.router)
 app.include_router(activities.router)
 app.include_router(tasks.router)
 app.include_router(tasks.list_router)
+app.include_router(note_files.router)
 app.include_router(time_entries.router)
 app.include_router(dashboard.router)
 app.include_router(settings.router)

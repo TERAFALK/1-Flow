@@ -814,6 +814,7 @@ class SalesLeadNoteOut(BaseModel):
     # Kundvyn samlar hela historiken; källan anges för de som kommer från en affär
     source_label: Optional[str] = None
     source_link: Optional[str] = None
+    files: List["SalesLeadFileOut"] = []
 
 
 class SalesLeadFileOut(BaseModel):

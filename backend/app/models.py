@@ -544,6 +544,10 @@ class SalesLeadNote(Base):
     order = relationship("SalesOrder", back_populates="order_notes")
     customer = relationship("Customer", back_populates="crm_notes")
     creator = relationship("User")
+    files = relationship(
+        "SalesLeadFile", back_populates="note",
+        cascade="all, delete-orphan", order_by="SalesLeadFile.id",
+    )
 
 
 class SalesActivity(Base):
@@ -566,11 +570,14 @@ class SalesActivity(Base):
 
 
 class SalesLeadFile(Base):
-    """Offert-PDF och annat underlag. Speglar WorkOrderFile men mot förfrågningar."""
+    """Bilaga i säljdelen. Hänger på antingen en förfrågan (offert-PDF och annat
+    underlag) eller på en enskild anteckning – ett mail eller några kort som kom
+    in i samband med kontakten."""
     __tablename__ = "sales_lead_files"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(Integer, ForeignKey("sales_leads.id"), nullable=False)
+    lead_id = Column(Integer, ForeignKey("sales_leads.id"))
+    note_id = Column(Integer, ForeignKey("sales_lead_notes.id"))
     filename = Column(String, nullable=False)             # uuid-namnet på disk
     original_name = Column(String, nullable=False)
     mime_type = Column(String)
@@ -579,6 +586,7 @@ class SalesLeadFile(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
     lead = relationship("SalesLead", back_populates="files")
+    note = relationship("SalesLeadNote", back_populates="files")
     uploader = relationship("User")
 
 

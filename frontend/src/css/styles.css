@@ -1468,3 +1468,21 @@ a.action-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
   color: var(--text-2);
 }
 .note-source:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Bilagor på en aktivitet ──────────────────────────────────────────────────── */
+
+.note-files {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.note-photos { margin-bottom: 4px; }
+.note-file { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.note-file .btn-icon { margin-left: auto; }
+.note-attach {
+  align-self: flex-start;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  padding: 3px 9px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--border); cursor: pointer;
+}
+.note-attach:hover { color: var(--accent); border-color: var(--accent); }

@@ -100,6 +100,7 @@ def _note_out(note: SalesLeadNote) -> SalesLeadNoteOut:
         body=note.body,
         created_at=note.created_at,
         created_by_name=note.creator.full_name if note.creator else None,
+        files=[SalesLeadFileOut.model_validate(f) for f in note.files],
     )
 
 

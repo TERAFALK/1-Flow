@@ -95,6 +95,12 @@ class Customer(Base):
     # Ingen delete-cascade: en kund med affärer ska inte gå att radera (se customers.py)
     sales_leads = relationship("SalesLead", back_populates="customer")
     sales_orders = relationship("SalesOrder", back_populates="customer")
+    # Följer med när kunden raderas – det är anteckningar, inte affärsposter
+    tasks = relationship("Task", back_populates="customer", cascade="all, delete-orphan")
+    crm_notes = relationship(
+        "SalesLeadNote", back_populates="customer",
+        cascade="all, delete-orphan", order_by="SalesLeadNote.note_date.desc()",
+    )
 
 
 class ContactPerson(Base):
@@ -286,13 +292,14 @@ class Activity(Base):
 
 
 class Task(Base):
-    """Uppgift på en arbetsorder eller på en offert. En offerts uppgifter flyttas
-    över till arbetsordern när affären blir såld."""
+    """Uppgift på en arbetsorder, en offert eller en kund. En offerts uppgifter
+    flyttas över till arbetsordern när affären blir såld."""
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
     work_order_id = Column(Integer, ForeignKey("work_orders.id"))
     lead_id = Column(Integer, ForeignKey("sales_leads.id"))
+    customer_id = Column(Integer, ForeignKey("customers.id"))
     title = Column(String, nullable=False)
     description = Column(Text)
     assigned_to = Column(Integer, ForeignKey("users.id"))
@@ -304,6 +311,7 @@ class Task(Base):
 
     work_order = relationship("WorkOrder", back_populates="tasks")
     lead = relationship("SalesLead", back_populates="tasks")
+    customer = relationship("Customer", back_populates="tasks")
     assigned_user = relationship("User", back_populates="tasks", foreign_keys=[assigned_to])
     creator = relationship("User", foreign_keys=[created_by])
 
@@ -516,14 +524,16 @@ class SalesLead(Base):
 class SalesLeadNote(Base):
     """En post i uppföljningsloggen. I Excel låg allt detta hopklistrat i en cell.
 
-    Hänger på antingen en förfrågan eller en såld order – uppföljningen ska kunna
-    fortsätta efter att affären gått igenom. Tabellnamnet är kvar från när bara
-    förfrågningar hade logg."""
+    Hänger på en förfrågan, en såld order eller en kund. Uppföljningen ska kunna
+    fortsätta efter att affären gått igenom, och en kundkontakt som inte är en
+    affär ska kunna loggas ändå. Tabellnamnet är kvar från när bara förfrågningar
+    hade logg."""
     __tablename__ = "sales_lead_notes"
 
     id = Column(Integer, primary_key=True, index=True)
     lead_id = Column(Integer, ForeignKey("sales_leads.id"))
     order_id = Column(Integer, ForeignKey("sales_orders.id"))
+    customer_id = Column(Integer, ForeignKey("customers.id"))
     note_date = Column(Date, nullable=False)
     kind = Column(Enum(SalesNoteKind), default=SalesNoteKind.anteckning, nullable=False)
     body = Column(Text, nullable=False)
@@ -532,6 +542,7 @@ class SalesLeadNote(Base):
 
     lead = relationship("SalesLead", back_populates="lead_notes")
     order = relationship("SalesOrder", back_populates="order_notes")
+    customer = relationship("Customer", back_populates="crm_notes")
     creator = relationship("User")
 
 

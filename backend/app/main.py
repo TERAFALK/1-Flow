@@ -336,6 +336,14 @@ def _run_migrations():
         "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL",
         "ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP",
         "CREATE INDEX IF NOT EXISTS ix_sales_leads_archived_at ON sales_leads (archived_at)",
+        # Uppgifter och anteckningar kan nu hänga direkt på en kund – en förfrågan
+        # som varken är offert eller affär ska gå att logga ändå. CASCADE eftersom
+        # de är anteckningar och inte affärsposter; offerter och ordrar blockerar
+        # fortfarande radering av kunden (se routers/customers.py).
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS ix_tasks_customer_id ON tasks (customer_id)",
+        "ALTER TABLE sales_lead_notes ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS ix_sales_lead_notes_customer_id ON sales_lead_notes (customer_id)",
         # Uppgifter kan nu ligga på en offert och flyttas till arbetsordern vid försäljning
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lead_id INTEGER REFERENCES sales_leads(id) ON DELETE CASCADE",
         "ALTER TABLE tasks ALTER COLUMN work_order_id DROP NOT NULL",
@@ -459,6 +467,7 @@ app.include_router(purchases.router)
 app.include_router(files.router)
 app.include_router(activities.router)
 app.include_router(tasks.router)
+app.include_router(tasks.list_router)
 app.include_router(time_entries.router)
 app.include_router(dashboard.router)
 app.include_router(settings.router)

@@ -1447,3 +1447,24 @@ a.action-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
 @media (max-width: 1000px) {
   .overview-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Uppgiftslistan: källchip ────────────────────────────────────────────────── */
+
+.task-source {
+  font-size: 11.5px; font-weight: 600;
+  padding: 2px 8px; border-radius: 20px;
+  background: var(--border); color: var(--text-2);
+}
+.task-source:hover { filter: brightness(.96); }
+.task-source.arbetsorder { background: var(--purple-light); color: var(--purple); }
+.task-source.offert      { background: var(--info-light);   color: var(--info); }
+.task-source.kund        { background: var(--success-light);color: var(--success); }
+
+/* Källan på en ärvd anteckning i kundens historik */
+.note-source {
+  font-size: 11px; font-weight: 600;
+  padding: 1px 7px; border-radius: 20px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.note-source:hover { color: var(--accent); border-color: var(--accent); }

@@ -3,6 +3,8 @@ import { fmtDate, statusBadge } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { renderCustomerSales } from './sales.js';
+import { notesCardHtml, bindNotes } from '../components/notes.js';
+import { tasksCardHtml, bindTasks } from '../components/tasks.js';
 
 export async function renderCustomers(el) {
   let allRows = [];
@@ -128,6 +130,7 @@ export async function renderCustomerDetail(el, id) {
       <div class="tab" data-tab="vehicles">Fordon <span style="font-size:11px;opacity:.6">(${vehicles.length})</span></div>
       <div class="tab" data-tab="history">Historik <span style="font-size:11px;opacity:.6">(${orders.length})</span></div>
       <div class="tab" data-tab="sales">Affärer</div>
+      <div class="tab" data-tab="activity">Aktivitet</div>
     </div>
 
     <div id="tab-info">
@@ -195,6 +198,8 @@ export async function renderCustomerDetail(el, id) {
 
     <div id="tab-sales" class="hidden"><div class="loading">Laddar…</div></div>
 
+    <div id="tab-activity" class="hidden"><div class="loading">Laddar…</div></div>
+
     <div id="tab-history" class="hidden">
       <div class="card">
         <div class="card-header"><span class="card-title">Arbetsorder-historik</span></div>
@@ -220,18 +225,24 @@ export async function renderCustomerDetail(el, id) {
 
   // Tab switching
   let salesLoaded = false;
+  let activityLoaded = false;
   document.getElementById('customer-tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('.tab');
     if (!tab) return;
     document.querySelectorAll('#customer-tabs .tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    ['info', 'contacts', 'vehicles', 'history', 'sales'].forEach(name => {
+    ['info', 'contacts', 'vehicles', 'history', 'sales', 'activity'].forEach(name => {
       document.getElementById(`tab-${name}`).classList.toggle('hidden', name !== tab.dataset.tab);
     });
     // Affärerna hämtas först när fliken öppnas – kundkortet ska inte vänta på dem
     if (tab.dataset.tab === 'sales' && !salesLoaded) {
       salesLoaded = true;
       renderCustomerSales(document.getElementById('tab-sales'), id);
+    }
+    // Aktiviteten hämtas först när fliken öppnas – den slår ihop tre källor
+    if (tab.dataset.tab === 'activity' && !activityLoaded) {
+      activityLoaded = true;
+      renderCustomerActivity(id);
     }
   });
 
@@ -404,4 +415,38 @@ export function openCustomerForm(customer, onSaved) {
       showToast(err.message, 'error');
     }
   });
+}
+
+
+/** Kundkortets aktivitetsflik: uppgifter på kunden och hela uppföljningshistoriken
+ *  – kundens egna anteckningar plus de från kundens offerter och sålda affärer. */
+async function renderCustomerActivity(customerId) {
+  const host = document.getElementById('tab-activity');
+  if (!host) return;
+  const base = `/customers/${customerId}`;
+  const reload = () => renderCustomerActivity(customerId);
+
+  let tasks = [];
+  let notes = [];
+  try {
+    [tasks, notes] = await Promise.all([
+      api.get(`${base}/tasks`),
+      api.get(`${base}/notes`),
+    ]);
+  } catch (err) {
+    host.innerHTML = `<div class="alert alert-error">Fel: ${err.message}</div>`;
+    return;
+  }
+  if (!document.getElementById('tab-activity')) return;
+
+  host.innerHTML = `
+    ${tasksCardHtml(tasks, {
+      emptyText: 'Inga uppgifter på kunden. Använd dem för sådant som behöver följas upp utan att vara en offert.',
+      printable: false,
+    })}
+    ${notesCardHtml(notes, { title: 'Aktivitet och historik' })}
+  `;
+
+  bindTasks(base, tasks, reload);
+  bindNotes(base, reload);
 }

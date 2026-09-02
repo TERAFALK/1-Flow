@@ -77,7 +77,7 @@ function actionRowHtml(d) {
     },
     {
       label: 'Förfallna uppgifter', value: d.overdue_tasks,
-      sub: 'Arbetsorder och offerter', href: '#/work-orders',
+      sub: 'Arbetsorder, offerter och kunder', href: '#/tasks?scope=overdue',
     },
     {
       label: 'Schemalagda idag', value: d.scheduled_today,

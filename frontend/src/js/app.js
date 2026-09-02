@@ -12,6 +12,7 @@ import { renderUsers } from './pages/users.js';
 import { renderSettings } from './pages/settings.js';
 import { renderPickLists } from './pages/pick-lists.js';
 import { renderSales, renderQuotes, renderSalesLeadDetail, renderSalesOrderDetail } from './pages/sales.js';
+import { renderTasks } from './pages/tasks.js';
 
 // index.html laddar den här filen som app.js?v=N för cachebrytning, medan
 // sidmodulerna importerar '../app.js' för fmtDate/statusBadge. Det är två olika
@@ -93,6 +94,7 @@ function parseHash() {
 const PAGE_TITLES = {
   '/dashboard':    'Översikt',
   '/work-orders':  'Arbetsorder',
+  '/tasks':        'Uppgifter',
   '/customers':    'Kunder',
   '/vehicles':     'Fordon',
   '/scanner':      'Scanner',
@@ -165,6 +167,7 @@ async function route() {
     const map = {
       '/dashboard':     renderDashboard,
       '/work-orders':   renderWorkOrders,
+      '/tasks':         renderTasks,
       '/customers':     renderCustomers,
       '/vehicles':      renderVehicles,
       '/articles':      renderArticles,

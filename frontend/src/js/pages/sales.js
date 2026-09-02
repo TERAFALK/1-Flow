@@ -4,6 +4,8 @@ import { showToast } from '../components/toast.js';
 import { openCustomerForm } from './customers.js';
 import { renderGantt } from '../components/gantt.js';
 import { makeAllSearchable } from '../components/combobox.js';
+import { notesCardHtml, bindNotes } from '../components/notes.js';
+import { tasksCardHtml, bindTasks } from '../components/tasks.js';
 
 // ── Gemensamma hjälpare ───────────────────────────────────────────────────────
 
@@ -42,13 +44,6 @@ const STATUSES = [
   { key: 'avslutad', label: 'Avslutad' },
 ];
 const STATUS_LABEL = Object.fromEntries(STATUSES.map(s => [s.key, s.label]));
-
-const NOTE_KINDS = {
-  samtal: 'Samtal',
-  mail: 'Mail',
-  mote: 'Möte',
-  anteckning: 'Anteckning',
-};
 
 export function salesStatusBadge(status) {
   return `<span class="badge badge-sales-${esc(status)}">${esc(STATUS_LABEL[status] || status)}</span>`;
@@ -837,40 +832,6 @@ function openActivityForm(base, activity, onSaved) {
   });
 }
 
-/** Uppföljningskortet. Fungerar likadant på förfrågan och order – på ordern kan
- *  listan även innehålla förfrågans logg, som är historik och inte redigerbar. */
-function notesCardHtml(notes) {
-  return `
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Uppföljning</span>
-        <div class="flex gap-2">
-          <button class="btn btn-secondary btn-sm" data-note-kind="samtal">Ringt</button>
-          <button class="btn btn-secondary btn-sm" data-note-kind="mail">Mailat</button>
-          <button class="btn btn-secondary btn-sm" data-note-kind="mote">Möte</button>
-          <button class="btn btn-primary btn-sm" data-note-kind="anteckning">Anteckning</button>
-        </div>
-      </div>
-      <div class="card-body" id="notes-body">${notesHtml(notes)}</div>
-    </div>`;
-}
-
-function bindNotes(base, reload, { withFollowup = false } = {}) {
-  document.querySelectorAll('[data-note-kind]').forEach(btn => {
-    btn.addEventListener('click', () => openNoteForm(base, btn.dataset.noteKind, reload, { withFollowup }));
-  });
-  document.querySelectorAll('[data-del-note]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!await confirmDialog('Ta bort anteckningen?')) return;
-      try {
-        await api.delete(`${base}/notes/${btn.dataset.delNote}`);
-        showToast('Anteckning borttagen', 'success');
-        reload();
-      } catch (err) { showToast(err.message, 'error'); }
-    });
-  });
-}
-
 function stepRow(label, value) {
   return `
     <div class="step-row ${value ? 'done' : ''}">
@@ -883,64 +844,6 @@ function stepRow(label, value) {
 function metaRow(label, value, raw = false) {
   if (!value) return '';
   return `<div class="meta-row"><span class="meta-label">${esc(label)}:</span><span>${raw ? value : esc(value)}</span></div>`;
-}
-
-function notesHtml(notes) {
-  if (!notes?.length) return '<div class="empty-state" style="padding:28px"><p>Ingen uppföljning ännu</p></div>';
-  return `
-    <div class="timeline">
-      ${notes.map(n => `
-        <div class="timeline-item">
-          <div class="timeline-head">
-            <span class="badge badge-note-${esc(n.kind)}">${esc(NOTE_KINDS[n.kind] || n.kind)}</span>
-            <span class="text-muted">${fmtD(n.note_date)}</span>
-            ${n.created_by_name ? `<span class="text-muted">· ${esc(n.created_by_name)}</span>` : ''}
-            ${n.from_lead ? '<span class="text-muted" style="font-size:11px">· från förfrågan</span>' : ''}
-            <div style="flex:1"></div>
-            ${n.from_lead ? '' : `<button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">
-              ${TRASH_ICON}
-            </button>`}
-          </div>
-          <div class="timeline-body">${esc(n.body)}</div>
-        </div>`).join('')}
-    </div>`;
-}
-
-function openNoteForm(base, kind, onSaved, { withFollowup = false } = {}) {
-  openModal({
-    title: NOTE_KINDS[kind] || 'Anteckning',
-    body: `
-      <form id="note-form">
-        <div class="form-row">
-          <div class="field"><label>Datum</label><input type="date" name="note_date" value="${todayISO()}"></div>
-          ${withFollowup ? '<div class="field"><label>Nästa uppföljning</label><input type="date" name="next_followup_date"></div>' : ''}
-        </div>
-        <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus></textarea></div>
-        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
-          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
-          <button type="submit" class="btn btn-primary">Spara</button>
-        </div>
-      </form>`,
-  });
-
-  document.getElementById('note-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      await api.post(`${base}/notes`, {
-        kind,
-        note_date: fd.get('note_date') || null,
-        body: fd.get('body'),
-      });
-      // Uppföljningsdatumet ligger på förfrågan, inte på anteckningen – spara det separat
-      if (withFollowup && fd.get('next_followup_date')) {
-        await api.put(base, { next_followup_date: fd.get('next_followup_date') });
-      }
-      showToast('Uppföljning sparad', 'success');
-      closeModal();
-      onSaved?.();
-    } catch (err) { showToast(err.message, 'error'); }
-  });
 }
 
 // ── Formulär: förfrågan ───────────────────────────────────────────────────────
@@ -1191,130 +1094,6 @@ function bindDescriptionEdit(base, lead, reload) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) document.getElementById('desc-save').click();
       if (e.key === 'Escape') reload();
     });
-  });
-}
-
-// ── Uppgifter ─────────────────────────────────────────────────────────────────
-
-function tasksCardHtml(tasks) {
-  const done = tasks.filter(t => t.completed).length;
-  return `
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header">
-        <span class="card-title">Uppgifter ${tasks.length ? `<span class="text-muted" style="font-weight:400">(${done}/${tasks.length})</span>` : ''}</span>
-        <div class="flex gap-2">
-          ${tasks.length ? '<button type="button" class="btn btn-ghost btn-sm" id="tasks-print">Skriv ut lista</button>' : ''}
-          <button type="button" class="btn btn-secondary btn-sm" id="add-task-btn">+ Uppgift</button>
-        </div>
-      </div>
-      <div class="card-body" id="tasks-body">
-        ${tasks.length ? tasks.map(taskRowHtml).join('')
-          : '<p class="text-muted" style="font-size:13px;margin:0">Inga uppgifter ännu. De följer med till arbetsordern om offerten säljs.</p>'}
-      </div>
-    </div>`;
-}
-
-function taskRowHtml(t) {
-  return `
-    <div class="lead-task ${t.completed ? 'done' : ''}" data-task-id="${t.id}">
-      <input type="checkbox" data-task-toggle="${t.id}" ${t.completed ? 'checked' : ''}>
-      <div class="lead-task-body">
-        <div class="lead-task-title">${esc(t.title)}</div>
-        ${t.description ? `<div class="lead-task-desc">${esc(t.description)}</div>` : ''}
-        ${(t.assigned_user || t.due_date) ? `
-          <div class="lead-task-meta">
-            ${t.assigned_user ? esc(t.assigned_user.full_name) : ''}
-            ${t.assigned_user && t.due_date ? ' · ' : ''}
-            ${t.due_date ? `Klart till ${fmtD(t.due_date)}` : ''}
-          </div>` : ''}
-      </div>
-      <button type="button" class="btn-icon" title="Redigera" data-task-edit="${t.id}">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-      </button>
-      <button type="button" class="btn-icon" title="Ta bort" data-task-del="${t.id}">${TRASH_ICON}</button>
-    </div>`;
-}
-
-function bindTasks(base, tasks, reload) {
-  document.getElementById('add-task-btn')?.addEventListener('click', () => openTaskForm(base, null, reload));
-  document.getElementById('tasks-print')?.addEventListener('click', async () => {
-    try { await printFile(`${base}/tasks/pdf`); } catch (err) { showToast(err.message, 'error'); }
-  });
-
-  document.querySelectorAll('[data-task-toggle]').forEach(cb => {
-    cb.addEventListener('change', async () => {
-      try {
-        await api.put(`${base}/tasks/${cb.dataset.taskToggle}`, { completed: cb.checked });
-        cb.closest('.lead-task')?.classList.toggle('done', cb.checked);
-      } catch (err) { showToast(err.message, 'error'); cb.checked = !cb.checked; }
-    });
-  });
-
-  document.querySelectorAll('[data-task-edit]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const task = tasks.find(t => String(t.id) === btn.dataset.taskEdit);
-      if (task) openTaskForm(base, task, reload);
-    });
-  });
-
-  document.querySelectorAll('[data-task-del]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!await confirmDialog('Ta bort uppgiften?')) return;
-      try {
-        await api.delete(`${base}/tasks/${btn.dataset.taskDel}`);
-        showToast('Uppgift borttagen', 'success');
-        reload();
-      } catch (err) { showToast(err.message, 'error'); }
-    });
-  });
-}
-
-async function openTaskForm(base, task, onSaved) {
-  const users = await api.get('/users').catch(() => []);
-  openModal({
-    title: task ? 'Redigera uppgift' : 'Ny uppgift',
-    body: `
-      <form id="task-form">
-        <div class="field"><label>Uppgift *</label><input type="text" name="title" value="${esc(task?.title)}" required autofocus></div>
-        <div class="field"><label>Beskrivning</label><textarea name="description" rows="3">${esc(task?.description)}</textarea></div>
-        <div class="form-row">
-          <div class="field">
-            <label>Ansvarig</label>
-            <select name="assigned_to">
-              <option value="">–</option>
-              ${users.map(u => `<option value="${u.id}">${esc(u.full_name)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="field"><label>Klart till</label><input type="date" name="due_date" value="${task?.due_date ? String(task.due_date).slice(0, 10) : ''}"></div>
-        </div>
-        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
-          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
-          <button type="submit" class="btn btn-primary">Spara</button>
-        </div>
-      </form>`,
-  });
-
-  const form = document.getElementById('task-form');
-  if (task?.assigned_to) form.assigned_to.value = String(task.assigned_to);
-  makeAllSearchable(form);
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const body = {
-      title: fd.get('title'),
-      description: fd.get('description') || null,
-      assigned_to: fd.get('assigned_to') ? Number(fd.get('assigned_to')) : null,
-      // Backend förväntar sig en tidsstämpel, datumfältet ger bara ett datum
-      due_date: fd.get('due_date') ? `${fd.get('due_date')}T00:00:00` : null,
-    };
-    try {
-      if (task) await api.put(`${base}/tasks/${task.id}`, body);
-      else await api.post(`${base}/tasks`, body);
-      showToast('Uppgift sparad', 'success');
-      closeModal();
-      onSaved?.();
-    } catch (err) { showToast(err.message, 'error'); }
   });
 }
 

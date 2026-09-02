@@ -474,9 +474,10 @@ class TaskUpdate(BaseModel):
 class TaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    # Uppgiften hänger på antingen en arbetsorder eller en offert
+    # Uppgiften hänger på en arbetsorder, en offert eller en kund
     work_order_id: Optional[int] = None
     lead_id: Optional[int] = None
+    customer_id: Optional[int] = None
     title: str
     description: Optional[str]
     assigned_to: Optional[int]
@@ -486,6 +487,15 @@ class TaskOut(BaseModel):
     created_by: Optional[int]
     created_at: datetime
     assigned_user: Optional[UserOut] = None
+
+
+class TaskListItem(TaskOut):
+    """Uppgift i den globala listan. Bär med sig var den hör hemma så att listan
+    kan visa källan och länka dit utan ett anrop per rad."""
+    parent_type: str = ""        # 'arbetsorder' | 'offert' | 'kund'
+    parent_label: str = ""
+    parent_link: str = ""
+    customer_name: Optional[str] = None
 
 
 # ── Work Orders ───────────────────────────────────────────────────────────────
@@ -801,6 +811,9 @@ class SalesLeadNoteOut(BaseModel):
     created_by_name: Optional[str] = None
     # Ordervyn visar även förfrågans logg – då är den historik och inte redigerbar
     from_lead: bool = False
+    # Kundvyn samlar hela historiken; källan anges för de som kommer från en affär
+    source_label: Optional[str] = None
+    source_link: Optional[str] = None
 
 
 class SalesLeadFileOut(BaseModel):

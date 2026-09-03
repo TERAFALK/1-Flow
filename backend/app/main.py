@@ -10,7 +10,7 @@ from .routers import (
     auth, users, customers, vehicles, articles,
     work_orders, time_entries, dashboard,
     settings, contacts, phases, purchases, files, activities, tasks,
-    pick_lists, sales_leads, sales_orders, sales_milestones, note_files,
+    pick_lists, sales_leads, sales_orders, sales_milestones, notes,
 )
 
 models.Base.metadata.create_all(bind=engine)
@@ -473,7 +473,7 @@ app.include_router(files.router)
 app.include_router(activities.router)
 app.include_router(tasks.router)
 app.include_router(tasks.list_router)
-app.include_router(note_files.router)
+app.include_router(notes.router)
 app.include_router(time_entries.router)
 app.include_router(dashboard.router)
 app.include_router(settings.router)

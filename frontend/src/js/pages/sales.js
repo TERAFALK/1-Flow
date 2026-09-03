@@ -674,7 +674,7 @@ export async function renderSalesLeadDetail(el, id) {
     } catch (err) { showToast(err.message, 'error'); }
   });
 
-  bindNotes(base, reload, { withFollowup: true });
+  bindNotes(base, reload, { withFollowup: true, notes: lead.lead_notes });
 
   bindDescriptionEdit(base, lead, reload);
   bindTasks(base, lead.tasks || [], reload);
@@ -1374,7 +1374,7 @@ export async function renderSalesOrderDetail(el, id) {
 
   document.getElementById('edit-order-btn').addEventListener('click', () => openOrderForm(order, reload));
   bindPrintButtons('order-pdf', `${base}/pdf`, `order-${id}.pdf`);
-  bindNotes(base, reload);
+  bindNotes(base, reload, { notes: order.order_notes });
 
   document.getElementById('archive-btn')?.addEventListener('click', async () => {
     if (!await confirmDialog(

@@ -15,6 +15,7 @@ export const NOTE_KINDS = {
 };
 
 const TRASH_ICON = `<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>`;
+const EDIT_ICON = `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>`;
 
 function esc(v) {
   if (v === null || v === undefined) return '';
@@ -58,9 +59,9 @@ export function notesHtml(notes) {
             ${n.from_lead ? '<span class="text-muted" style="font-size:11px">· från förfrågan</span>' : ''}
             ${n.source_label ? `<a class="note-source" href="${esc(n.source_link || '#')}">${esc(n.source_label)}</a>` : ''}
             <div style="flex:1"></div>
-            ${isInherited(n) ? '' : `<button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">
-              ${TRASH_ICON}
-            </button>`}
+            ${isInherited(n) ? '' : `
+              <button type="button" class="btn-icon" title="Redigera" data-edit-note="${n.id}">${EDIT_ICON}</button>
+              <button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">${TRASH_ICON}</button>`}
           </div>
           <div class="timeline-body">${esc(n.body)}</div>
           ${noteFilesHtml(n)}
@@ -135,9 +136,16 @@ async function uploadNoteFiles(noteId, files) {
  * @param {Function} reload  ritar om vyn efter en ändring
  * @param {object} opts      withFollowup: visa "Nästa uppföljning" (bara förfrågningar)
  */
-export function bindNotes(base, reload, { withFollowup = false } = {}) {
+export function bindNotes(base, reload, { withFollowup = false, notes = [] } = {}) {
   document.querySelectorAll('[data-note-kind]').forEach(btn => {
     btn.addEventListener('click', () => openNoteForm(base, btn.dataset.noteKind, reload, { withFollowup }));
+  });
+
+  document.querySelectorAll('[data-edit-note]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const note = notes.find(n => String(n.id) === btn.dataset.editNote);
+      if (note) openNoteForm(base, note.kind, reload, { note });
+    });
   });
   document.querySelectorAll('[data-del-note]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -202,16 +210,24 @@ function bindNoteFiles(reload) {
   loadNoteThumbs();
 }
 
-export function openNoteForm(base, kind, onSaved, { withFollowup = false } = {}) {
+export function openNoteForm(base, kind, onSaved, { withFollowup = false, note = null } = {}) {
+  const editing = !!note;
   openModal({
-    title: NOTE_KINDS[kind] || 'Anteckning',
+    title: editing ? 'Redigera anteckning' : (NOTE_KINDS[kind] || 'Anteckning'),
     body: `
       <form id="note-form">
         <div class="form-row">
-          <div class="field"><label>Datum</label><input type="date" name="note_date" value="${todayISO()}"></div>
+          <div class="field">
+            <label>Typ</label>
+            <select name="kind">
+              ${Object.entries(NOTE_KINDS).map(([k, label]) =>
+                `<option value="${k}" ${k === kind ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Datum</label><input type="date" name="note_date" value="${note ? String(note.note_date).slice(0, 10) : todayISO()}"></div>
           ${withFollowup ? '<div class="field"><label>Nästa uppföljning</label><input type="date" name="next_followup_date"></div>' : ''}
         </div>
-        <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus></textarea></div>
+        <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus>${esc(note?.body)}</textarea></div>
         <div class="field">
           <label>Bifoga filer eller kort</label>
           <input type="file" name="files" multiple>
@@ -226,20 +242,25 @@ export function openNoteForm(base, kind, onSaved, { withFollowup = false } = {})
   document.getElementById('note-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const payload = {
+      kind: fd.get('kind') || kind,
+      note_date: fd.get('note_date') || null,
+      body: fd.get('body'),
+    };
     try {
-      const note = await api.post(`${base}/notes`, {
-        kind,
-        note_date: fd.get('note_date') || null,
-        body: fd.get('body'),
-      });
+      // Redigering går via den generiska /api/notes/{id} – anteckningen har bara
+      // en förälder, och rutten fungerar oavsett vilken det är
+      const saved = editing
+        ? await api.put(`/notes/${note.id}`, payload)
+        : await api.post(`${base}/notes`, payload);
       // Filerna kan först laddas upp när anteckningen har fått ett id
       const chosen = [...(e.target.files?.files || [])];
-      if (chosen.length) await uploadNoteFiles(note.id, chosen);
+      if (chosen.length) await uploadNoteFiles(saved.id, chosen);
       // Uppföljningsdatumet ligger på förfrågan, inte på anteckningen – spara det separat
       if (withFollowup && fd.get('next_followup_date')) {
         await api.put(base, { next_followup_date: fd.get('next_followup_date') });
       }
-      showToast('Uppföljning sparad', 'success');
+      showToast(editing ? 'Anteckning uppdaterad' : 'Uppföljning sparad', 'success');
       closeModal();
       onSaved?.();
     } catch (err) { showToast(err.message, 'error'); }

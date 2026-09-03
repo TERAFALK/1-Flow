@@ -1,8 +1,9 @@
-"""Bilagor på en enskild anteckning.
+"""Redigering av en anteckning och dess bilagor.
 
-Rutten är generisk mot anteckningen och inte mot dess förälder, så samma
+Rutterna är generiska mot anteckningen och inte mot dess förälder, så samma
 endpoints fungerar oavsett om anteckningen sitter på en kund, en förfrågan eller
-en såld order. Idag används den från kundens aktivitetsflik.
+en såld order. Att skapa och ta bort sker däremot via föräldern, som har
+kontrollen på att man inte rör en annan posts logg.
 """
 import os
 from typing import List
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..database import get_db
 from ..deps import require_admin
 from ..models import SalesLeadNote, SalesLeadFile, User
-from ..schemas import SalesLeadFileOut
+from ..schemas import SalesLeadFileOut, SalesLeadNoteOut, SalesLeadNoteUpdate
 from ..uploads import store_file, file_path, remove_file
 
 router = APIRouter(prefix="/api/notes", tags=["note-files"])
@@ -26,7 +27,7 @@ UPLOAD_ROOT = "/app/uploads/crm-notes"
 def _get_note(db: Session, note_id: int) -> SalesLeadNote:
     note = (
         db.query(SalesLeadNote)
-        .options(joinedload(SalesLeadNote.files))
+        .options(joinedload(SalesLeadNote.files), joinedload(SalesLeadNote.creator))
         .filter(SalesLeadNote.id == note_id)
         .first()
     )
@@ -42,6 +43,32 @@ def _get_file(db: Session, note_id: int, file_id: int) -> SalesLeadFile:
     if not record:
         raise HTTPException(status_code=404, detail="Fil ej hittad")
     return record
+
+
+@router.put("/{note_id}", response_model=SalesLeadNoteOut)
+def update_note(
+    note_id: int,
+    body: SalesLeadNoteUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Rättar en redan skriven anteckning – text, typ eller datum. Gränssnittet
+    erbjuder det bara på anteckningens egen vy; en ärvd logg redigeras där den
+    hör hemma."""
+    note = _get_note(db, note_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(note, field, value)
+    db.commit()
+    db.refresh(note)
+    return SalesLeadNoteOut(
+        id=note.id,
+        note_date=note.note_date,
+        kind=note.kind,
+        body=note.body,
+        created_at=note.created_at,
+        created_by_name=note.creator.full_name if note.creator else None,
+        files=[SalesLeadFileOut.model_validate(f) for f in note.files],
+    )
 
 
 @router.get("/{note_id}/files", response_model=List[SalesLeadFileOut])

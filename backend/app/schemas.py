@@ -801,6 +801,13 @@ class SalesLeadNoteCreate(BaseModel):
     note_date: Optional[date] = None
 
 
+class SalesLeadNoteUpdate(BaseModel):
+    """Alla fält valfria – en rättning rör oftast bara texten."""
+    body: Optional[str] = None
+    kind: Optional[SalesNoteKind] = None
+    note_date: Optional[date] = None
+
+
 class SalesLeadNoteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

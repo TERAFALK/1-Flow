@@ -448,5 +448,5 @@ async function renderCustomerActivity(customerId) {
   `;
 
   bindTasks(base, tasks, reload);
-  bindNotes(base, reload);
+  bindNotes(base, reload, { notes });
 }

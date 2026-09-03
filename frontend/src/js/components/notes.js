@@ -47,26 +47,72 @@ export function notesCardHtml(notes, { title = 'Uppföljning' } = {}) {
 }
 
 export function notesHtml(notes) {
-  if (!notes?.length) return '<div class="empty-state" style="padding:28px"><p>Ingen uppföljning ännu</p></div>';
+  if (!notes?.length) {
+    return '<div class="empty-state" style="padding:28px"><p>Ingen aktivitet ännu</p></div>';
+  }
   return `
-    <div class="timeline">
-      ${notes.map(n => `
-        <div class="timeline-item">
-          <div class="timeline-head">
-            <span class="badge badge-note-${esc(n.kind)}">${esc(NOTE_KINDS[n.kind] || n.kind)}</span>
-            <span class="text-muted">${fmtD(n.note_date)}</span>
-            ${n.created_by_name ? `<span class="text-muted">· ${esc(n.created_by_name)}</span>` : ''}
-            ${n.from_lead ? '<span class="text-muted" style="font-size:11px">· från förfrågan</span>' : ''}
-            ${n.source_label ? `<a class="note-source" href="${esc(n.source_link || '#')}">${esc(n.source_label)}</a>` : ''}
-            <div style="flex:1"></div>
-            ${isInherited(n) ? '' : `
-              <button type="button" class="btn-icon" title="Redigera" data-edit-note="${n.id}">${EDIT_ICON}</button>
-              <button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">${TRASH_ICON}</button>`}
-          </div>
-          <div class="timeline-body">${esc(n.body)}</div>
-          ${noteFilesHtml(n)}
-        </div>`).join('')}
+    <div class="crm-log">
+      ${notes.map(entryHtml).join('')}
     </div>`;
+}
+
+/** En post i loggen: skena med prick till vänster, rubrikrad och text till höger.
+ *
+ *  Klassnamnen ligger i ett eget namnrum. Arbetsorderns aktivitetslogg använder
+ *  .timeline/.timeline-item med en helt annan struktur, och den satte display:flex
+ *  på posten – vilket la rubrik och brödtext bredvid varandra här istället för
+ *  under. Två komponenter ska inte dela klassnamn.
+ */
+function entryHtml(n) {
+  const editable = !isInherited(n);
+  return `
+    <div class="crm-entry" data-entry="${n.id}">
+      <div class="crm-rail"><span class="crm-dot crm-dot-${esc(n.kind)}"></span></div>
+      <div class="crm-main">
+        <div class="crm-head">
+          <span class="badge badge-note-${esc(n.kind)}">${esc(NOTE_KINDS[n.kind] || n.kind)}</span>
+          <span class="crm-date">${fmtD(n.note_date)}</span>
+          ${n.created_by_name ? `<span class="crm-author">${esc(n.created_by_name)}</span>` : ''}
+          ${n.source_label
+            ? `<a class="note-source" href="${esc(n.source_link || '#')}">${esc(n.source_label)}</a>`
+            : n.from_lead ? '<span class="note-source">Från förfrågan</span>' : ''}
+          ${editable ? `
+            <div class="crm-actions">
+              <button type="button" class="btn-icon" title="Redigera" data-edit-note="${n.id}">${EDIT_ICON}</button>
+              <button type="button" class="btn-icon" title="Ta bort" data-del-note="${n.id}">${TRASH_ICON}</button>
+            </div>` : ''}
+        </div>
+        <div class="crm-body" data-body="${n.id}">${esc(n.body)}</div>
+        <button type="button" class="crm-more hidden" data-more="${n.id}">Visa hela</button>
+        ${noteFilesHtml(n)}
+      </div>
+    </div>`;
+}
+
+/** Inklistrade mailtrådar blir långa. Posterna kortas av och får en "Visa hela"
+ *  först när texten faktiskt är för hög – annars hade knappen dykt upp på
+ *  enradiga anteckningar också. */
+async function bindClamping(root = document) {
+  // Mät först när webbtypsnittet är på plats. Med reservtypsnittet blir texten
+  // högre, och poster som egentligen ryms hade annars fastnat med "Visa hela".
+  try { await document.fonts?.ready; } catch { /* saknas i äldre webbläsare */ }
+
+  root.querySelectorAll('.crm-body').forEach(body => {
+    // Klassen måste sättas först – utan max-height är scrollHeight alltid lika
+    // med clientHeight och ingen post hade någonsin räknats som för lång
+    body.classList.add('clamped');
+    if (body.scrollHeight <= body.clientHeight + 2) {
+      body.classList.remove('clamped');
+      return;
+    }
+    const btn = root.querySelector(`[data-more="${body.dataset.body}"]`);
+    if (!btn) return;
+    btn.classList.remove('hidden');
+    btn.addEventListener('click', () => {
+      const open = body.classList.toggle('open');
+      btn.textContent = open ? 'Visa mindre' : 'Visa hela';
+    });
+  });
 }
 
 const isImage = (f) => (f.mime_type || '').startsWith('image/');
@@ -159,6 +205,7 @@ export function bindNotes(base, reload, { withFollowup = false, notes = [] } = {
   });
 
   bindNoteFiles(reload);
+  bindClamping();
 }
 
 /** Bilagorna går mot /api/notes/{id}/files – samma rutt oavsett om anteckningen

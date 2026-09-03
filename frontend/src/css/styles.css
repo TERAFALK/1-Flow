@@ -1224,10 +1224,9 @@ tbody tr.clickable { cursor: pointer; }
 .step-date { color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* Uppföljningslogg */
-.timeline { display: flex; flex-direction: column; gap: 14px; }
-.timeline-item { border-left: 2px solid var(--border); padding-left: 12px; }
-.timeline-head { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
-.timeline-body { font-size: 13.5px; white-space: pre-wrap; }
+/* CRM-loggens klasser ligger i .crm-* längre ned. Den delade tidigare
+   .timeline med arbetsorderns aktivitetslogg, som satte display:flex på posten –
+   rubrik och brödtext hamnade då bredvid varandra istället för under. */
 
 /* Milstolpar */
 .milestone-grid {
@@ -1486,3 +1485,67 @@ a.action-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
   border: 1px dashed var(--border); cursor: pointer;
 }
 .note-attach:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── CRM-logg: aktivitet och uppföljning ─────────────────────────────────────── */
+/* Eget namnrum. Arbetsorderns aktivitetslogg använder .timeline-* med en annan
+   struktur, och två komponenter ska inte dela klassnamn. */
+
+.crm-log { display: flex; flex-direction: column; }
+
+.crm-entry { display: flex; gap: 12px; padding: 14px 0; }
+.crm-entry + .crm-entry { border-top: 1px solid var(--border-light); }
+.crm-entry:first-child { padding-top: 2px; }
+.crm-entry:last-child  { padding-bottom: 2px; }
+
+/* Skenan binder ihop posterna visuellt utan att stjäla plats från texten */
+.crm-rail { position: relative; flex: none; width: 10px; display: flex; justify-content: center; }
+.crm-rail::before {
+  content: ''; position: absolute; top: 16px; bottom: -14px;
+  width: 2px; background: var(--border-light);
+}
+.crm-entry:last-child .crm-rail::before { display: none; }
+.crm-dot {
+  position: relative; z-index: 1;
+  width: 10px; height: 10px; margin-top: 5px;
+  border-radius: 50%; background: var(--border);
+  box-shadow: 0 0 0 3px var(--surface);
+}
+.crm-dot-samtal     { background: var(--info); }
+.crm-dot-mail       { background: var(--purple); }
+.crm-dot-mote       { background: var(--warning); }
+.crm-dot-anteckning { background: var(--text-3); }
+
+.crm-main { flex: 1; min-width: 0; }
+
+/* Rubrikraden radbryter hellre än trycker ihop datum och namn */
+.crm-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px; margin-bottom: 6px;
+}
+.crm-date   { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.crm-author { color: var(--text-3); white-space: nowrap; }
+.crm-author::before { content: '· '; }
+
+/* Knapparna tar ingen uppmärksamhet förrän man är i posten */
+.crm-actions { margin-left: auto; display: flex; gap: 2px; opacity: 0; transition: opacity .1s; }
+.crm-entry:hover .crm-actions,
+.crm-entry:focus-within .crm-actions { opacity: 1; }
+@media (hover: none) { .crm-actions { opacity: 1; } }
+
+.crm-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;   /* långa länkar och adresser spränger inte kolumnen */
+  max-width: 78ch;           /* läsbar radlängd även i en bred panel */
+}
+/* Inklistrade mailtrådar kortas av tills man vill se hela */
+.crm-body.clamped { max-height: 8.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.crm-body.clamped.open { max-height: none; -webkit-mask-image: none; mask-image: none; }
+.crm-more {
+  margin-top: 4px; padding: 0;
+  background: none; border: none;
+  font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--accent); cursor: pointer;
+}
+.crm-more:hover { text-decoration: underline; }

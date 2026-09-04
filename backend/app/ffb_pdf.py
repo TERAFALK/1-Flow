@@ -1,10 +1,13 @@
-"""Beställningen till Feldbinder som PDF.
+"""De två dokumenten till Feldbinder som PDF.
 
-Ritar om Word-mallen "FFB Order" som kunden tidigare fyllde i för hand: FFB:s
-logotyp överst, kundblocket, Order info och Chassis info sida vid sida,
-villkoren och till sist beställningstexten. Layouten är kodad här och bygger
-inte på Flows vanliga paneler (``draw_info_panel``) – dokumentet ska se ut som
-FFB:s eget, inte som en utskrift ur Flow.
+Ritar om Word-mallarna kunden tidigare fyllde i för hand – "FFB Order" när en
+affär är såld och "Quotation Request" när en offert ska begäras. Mallarna är
+samma dokument så när som på rubriken och vilka rutor som finns i vänstra
+spalten, så de delar ``_build`` här.
+
+Layouten är kodad och bygger inte på Flows vanliga paneler
+(``draw_info_panel``) – dokumenten ska se ut som FFB:s egna, inte som en
+utskrift ur Flow.
 """
 import io
 import os
@@ -57,9 +60,10 @@ def _v(value) -> str:
 class _Doc:
     """Canvas med y-läge, sidhuvud och sidfot."""
 
-    def __init__(self):
+    def __init__(self, title: str):
         self.buf = io.BytesIO()
         self.c = canvas.Canvas(self.buf, pagesize=A4)
+        self.title = title
         self.y = self._header()
 
     def _header(self) -> float:
@@ -75,7 +79,7 @@ class _Doc:
             c.drawString(MARGIN, top - 10, "FELDBINDER")
         c.setFillColor(colors.black)
         c.setFont("Helvetica-Bold", 16)
-        c.drawRightString(PAGE_W - MARGIN, top - LOGO_H + 2 * mm, "Order")
+        c.drawRightString(PAGE_W - MARGIN, top - LOGO_H + 2 * mm, self.title)
         return top - LOGO_H - 10 * mm
 
     def _footer(self):
@@ -162,27 +166,30 @@ def _block_height(rows, width) -> float:
     return height
 
 
-def build_ffb_order_pdf(ffb) -> io.BytesIO:
-    """Bygger beställningen och returnerar en färdig buffert."""
-    doc = _Doc()
+def _build(*, title, doc_date, cust, info_title, info_rows,
+           chassis_rows, terms_payment, terms_delivery,
+           body_title, body_text) -> io.BytesIO:
+    """Den gemensamma sidan. Skillnaden mellan order och offertförfrågan är
+    rubrikerna och vilka rader som står i vänstra spalten."""
+    doc = _Doc(title)
     c = doc.c
 
     # ── Kunden till vänster, datum/VAT/kundnummer till höger ─────────────────
     # Mallen flyttar de två tabellerna bredvid varandra med tblpPr, så de ska
     # börja på samma höjd.
     customer = [
-        ("Customer:", ffb.customer_name),
-        ("", ffb.address),
-        ("", ffb.postal_city),
-        ("Country:", ffb.country),
-        ("Phone:", ffb.phone),
-        ("Mail:", ffb.email),
-        ("Contact pers:", ffb.contact_person),
+        ("Customer:", cust.get("customer_name")),
+        ("", cust.get("address")),
+        ("", cust.get("postal_city")),
+        ("Country:", cust.get("country")),
+        ("Phone:", cust.get("phone")),
+        ("Mail:", cust.get("email")),
+        ("Contact pers:", cust.get("contact_person")),
     ]
     head = [
-        ("Date:", ffb.doc_date.isoformat() if ffb.doc_date else ""),
-        ("VAT nr:", ffb.vat_number),
-        ("Customer nr:", ffb.customer_number),
+        ("Date:", doc_date.isoformat() if doc_date else ""),
+        ("VAT nr:", cust.get("vat_number")),
+        ("Customer nr:", cust.get("customer_number")),
     ]
     doc.space(max(_block_height(customer, COL_W), _block_height(head, COL_W)) + 4 * mm)
     y_top = doc.y
@@ -190,37 +197,18 @@ def build_ffb_order_pdf(ffb) -> io.BytesIO:
     y2 = _rows(c, MARGIN + COL_W + COL_GAP, y_top, COL_W, head)
     doc.y = min(y1, y2) - 4 * mm
 
-    # ── Order info och Chassis info ──────────────────────────────────────────
-    doc.section("Order info", "Chassis info")
-    order_rows = [
-        ("Quantity:", ffb.quantity),
-        ("Quotation nr:", ffb.quotation_number),
-        ("Delivery time:", ffb.delivery_time),
-        ("Typ:", ffb.product_type),
-        ("Volume approx.", ffb.volume_approx),
-        ("Transport of:", ffb.transport_of),
-        ("Country of registration:", ffb.country_of_registration),
-        ("According to drawing:", ffb.drawing_number),
-        ("Special feature:", ffb.special_feature),
-    ]
-    chassis_rows = [
-        ("Chassi:", ffb.chassis_make),
-        ("Wheel base:", ffb.wheel_base),
-        ("FO Number:", ffb.fo_number),
-        ("Delivery time:", ffb.chassis_delivery_time),
-        ("Part No:", ffb.part_no),
-        ("Delivery time:", ffb.part_delivery_time),
-    ]
-    doc.space(max(_block_height(order_rows, COL_W), _block_height(chassis_rows, COL_W)) + 4 * mm)
+    # ── Vänstra spalten och Chassis info ─────────────────────────────────────
+    doc.section(info_title, "Chassis info")
+    doc.space(max(_block_height(info_rows, COL_W), _block_height(chassis_rows, COL_W)) + 4 * mm)
     y_top = doc.y
-    y1 = _rows(c, MARGIN, y_top, COL_W, order_rows)
+    y1 = _rows(c, MARGIN, y_top, COL_W, info_rows)
     y2 = _rows(c, MARGIN + COL_W + COL_GAP, y_top, COL_W, chassis_rows)
     doc.y = min(y1, y2) - 6 * mm
 
     # ── Villkor ──────────────────────────────────────────────────────────────
     terms = [
-        ("Terms of Payment", ffb.terms_payment),
-        ("Terms of Delivery:", ffb.terms_delivery),
+        ("Terms of Payment", terms_payment),
+        ("Terms of Delivery:", terms_delivery),
     ]
     height = _block_height(terms, CONTENT_W - 12 * mm) + 6 * mm
     doc.space(height)
@@ -229,11 +217,79 @@ def build_ffb_order_pdf(ffb) -> io.BytesIO:
     c.rect(MARGIN, doc.y - height + ROW_H - 2 * mm, CONTENT_W, height, fill=0, stroke=1)
     doc.y = _rows(c, MARGIN + 6 * mm, doc.y, CONTENT_W - 12 * mm, terms) - 8 * mm
 
-    # ── Order text ───────────────────────────────────────────────────────────
-    doc.section("Order text")
-    doc.body(ffb.order_text or "")
+    # ── Brödtexten ───────────────────────────────────────────────────────────
+    doc.section(body_title)
+    doc.body(body_text or "")
 
     doc._footer()
     c.save()
     doc.buf.seek(0)
     return doc.buf
+
+
+def build_ffb_order_pdf(ffb, cust: dict) -> io.BytesIO:
+    """Beställningen på en såld affär – mallen "FFB Order".
+
+    ``cust`` är kundblocket, som hämtas ur kunden vid utskrift i stället för att
+    ligga lagrat på posten – se ``routers.ffb_orders.customer_block``.
+    """
+    return _build(
+        title="Order",
+        doc_date=ffb.doc_date,
+        cust=cust,
+        info_title="Order info",
+        info_rows=[
+            ("Quantity:", ffb.quantity),
+            ("Quotation nr:", ffb.quotation_number),
+            ("Delivery time:", ffb.delivery_time),
+            ("Typ:", ffb.product_type),
+            ("Volume approx.", ffb.volume_approx),
+            ("Transport of:", ffb.transport_of),
+            ("Country of registration:", ffb.country_of_registration),
+            ("According to drawing:", ffb.drawing_number),
+            ("Special feature:", ffb.special_feature),
+        ],
+        chassis_rows=[
+            ("Chassi:", ffb.chassis_make),
+            ("Wheel base:", ffb.wheel_base),
+            ("FO Number:", ffb.fo_number),
+            ("Delivery time:", ffb.chassis_delivery_time),
+            ("Part No:", ffb.part_no),
+            ("Delivery time:", ffb.part_delivery_time),
+        ],
+        terms_payment=ffb.terms_payment,
+        terms_delivery=ffb.terms_delivery,
+        body_title="Order text",
+        body_text=ffb.order_text,
+    )
+
+
+def build_ffb_quote_pdf(quote, cust: dict) -> io.BytesIO:
+    """Offertförfrågan till FFB – mallen "Quotation Request".
+
+    Samma dokument som ordern men utan antal, offertnummer och leveranstider:
+    de är inte bestämda än när man ber om ett pris.
+    """
+    return _build(
+        title="Quotation Request",
+        doc_date=quote.doc_date,
+        cust=cust,
+        info_title="Quotation info",
+        info_rows=[
+            ("Typ:", quote.product_type),
+            ("Volume approx.", quote.volume_approx),
+            ("Transport of:", quote.transport_of),
+            ("Country of registration:", quote.country_of_registration),
+            ("According to drawing:", quote.drawing_number),
+            ("Special feature:", quote.special_feature),
+        ],
+        chassis_rows=[
+            ("Chassi:", quote.chassis_make),
+            ("Wheel base:", quote.wheel_base),
+            ("FO Number:", quote.fo_number),
+        ],
+        terms_payment=quote.terms_payment,
+        terms_delivery=quote.terms_delivery,
+        body_title="Quotation request text",
+        body_text=quote.request_text,
+    )

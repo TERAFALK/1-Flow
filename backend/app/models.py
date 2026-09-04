@@ -517,6 +517,9 @@ class SalesLead(Base):
         cascade="all, delete-orphan", order_by="SalesLeadNote.note_date.desc()",
     )
     files = relationship("SalesLeadFile", back_populates="lead", cascade="all, delete-orphan")
+    ffb_quote = relationship(
+        "FfbQuote", back_populates="lead", uselist=False, cascade="all, delete-orphan"
+    )
     activities = relationship(
         "SalesActivity", back_populates="lead", cascade="all, delete-orphan",
         order_by="SalesActivity.sort_order",
@@ -583,6 +586,9 @@ class SalesLeadFile(Base):
     id = Column(Integer, primary_key=True, index=True)
     lead_id = Column(Integer, ForeignKey("sales_leads.id"))
     note_id = Column(Integer, ForeignKey("sales_lead_notes.id"))
+    # Sätts på filer Flow själv genererar (offertförfrågan till FFB) så att de
+    # går att hitta och ersätta utan att gissa på originalnamnet
+    group_label = Column(String, index=True)
     filename = Column(String, nullable=False)             # uuid-namnet på disk
     original_name = Column(String, nullable=False)
     mime_type = Column(String)
@@ -735,9 +741,7 @@ class FfbOrder(Base):
     öppnas, och får sedan redigeras fritt – texten som går till FFB är kundens.
 
     Alla värden är text: mallens rutor innehåller "1 pc", "ASAP" och "Aug 2026"
-    lika gärna som ett datum eller ett antal. Kundblocket kopieras med flit i
-    stället för att slås upp vid utskrift – beställningen som skickades ska inte
-    ändras för att kunden byter adress ett halvår senare.
+    lika gärna som ett datum eller ett antal.
     """
     __tablename__ = "ffb_orders"
 
@@ -749,16 +753,10 @@ class FfbOrder(Base):
     # Huvud
     doc_date = Column(Date)
 
-    # Kundblock
-    vat_number = Column(String)
-    customer_number = Column(String)
-    customer_name = Column(String)
-    address = Column(String)
-    postal_city = Column(String)
-    country = Column(String)
-    phone = Column(String)
-    email = Column(String)
-    contact_person = Column(String)
+    # Kundblocket lagras inte här. Namn, adress, VAT, land, telefon, mail och
+    # kontaktperson hämtas ur kunden och förfrågan när beställningen läses, så
+    # att en rättad adress slår igenom direkt i stället för att ligga kvar som
+    # en kopia från den dag affären såldes.
 
     # Order info
     quantity = Column(String)
@@ -790,3 +788,47 @@ class FfbOrder(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     order = relationship("SalesOrder", back_populates="ffb_order")
+
+
+class FfbQuote(Base):
+    """Offertförfrågan till Feldbinder – mallen "Quotation Request".
+
+    Samma dokument som beställningen fast ett steg tidigare: den skickas för att
+    få ett pris, innan affären finns. Därför saknas antal, offertnummer och
+    leveranstider – de är inte bestämda än.
+
+    Bara feldbinder-förfrågningar har en; verkstadsofferter går aldrig via FFB.
+    Kundblocket lagras inte utan hämtas ur kunden när posten läses.
+    """
+    __tablename__ = "ffb_quotes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(
+        Integer, ForeignKey("sales_leads.id"), nullable=False, unique=True, index=True
+    )
+
+    doc_date = Column(Date)
+
+    # Quotation info
+    product_type = Column(String)
+    volume_approx = Column(String)
+    transport_of = Column(String)
+    country_of_registration = Column(String)
+    drawing_number = Column(String)
+    special_feature = Column(String)
+
+    # Chassis info
+    chassis_make = Column(String)
+    wheel_base = Column(String)
+    fo_number = Column(String)
+
+    terms_payment = Column(String)
+    terms_delivery = Column(String)
+
+    request_text = Column(Text)
+
+    updated_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    lead = relationship("SalesLead", back_populates="ffb_quote")

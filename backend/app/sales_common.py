@@ -33,6 +33,33 @@ def contact_fields(customer, contact) -> dict:
     )
 
 
+def _join(*parts) -> Optional[str]:
+    """Slår ihop delar till en rad och hoppar över de tomma."""
+    joined = " ".join(str(p).strip() for p in parts if p and str(p).strip())
+    return joined or None
+
+
+def ffb_customer_block(customer, contact) -> dict:
+    """Kundblocket på FFB-dokumenten, på engelska som mallarna.
+
+    Lagras inte på posten utan slås upp varje gång dokumentet läses eller skrivs
+    ut – rättar man en adress på kundkortet ska den slå igenom direkt i stället
+    för att ligga kvar som en kopia från den dag posten skapades. Delas av
+    beställningen och offertförfrågan.
+    """
+    return dict(
+        vat_number=(customer.vat_number or customer.org_number) if customer else None,
+        customer_number=customer.ffb_customer_number if customer else None,
+        customer_name=customer.name if customer else None,
+        address=customer.address if customer else None,
+        postal_city=_join(customer.postal_code, customer.city) if customer else None,
+        country=customer.country if customer else None,
+        phone=(contact.phone if contact else None) or (customer.phone if customer else None),
+        email=(contact.email if contact else None) or (customer.email if customer else None),
+        contact_person=contact.name if contact else None,
+    )
+
+
 def activity_out(a: SalesActivity) -> SalesActivityOut:
     return SalesActivityOut(
         id=a.id, name=a.name, color=a.color,

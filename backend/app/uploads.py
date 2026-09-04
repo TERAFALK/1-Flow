@@ -6,7 +6,19 @@ för att ett namn från en uppladdning aldrig ska kunna styra var på disken nå
 hamnar.
 """
 import os
+import re
 import uuid
+
+
+def safe_filename(name: str) -> str:
+    """Gör ett filnamn säkert att skicka i Content-Disposition.
+
+    Ordernummer och offertnummer är fritext. Ett citattecken bryter headern och
+    ett å/ä/ö får uvicorn att fallera när headern kodas som latin-1, så allt
+    utanför ett smalt teckenurval byts mot bindestreck.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name or "").strip("-")
+    return cleaned or "dokument"
 
 
 def store_file(root: str, key, original_name: str, content: bytes) -> str:

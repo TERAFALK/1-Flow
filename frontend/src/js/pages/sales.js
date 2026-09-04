@@ -551,6 +551,12 @@ export async function renderSalesLeadDetail(el, id) {
   const ffb = lead.kind !== 'verkstad';
   const route = ffb ? '/sales' : '/quotes';
 
+  // Bara feldbinder-affärer går via FFB. Att den inte går att hämta ska inte
+  // hindra förfrågan från att ritas.
+  const quote = ffb
+    ? await api.get(`/sales/leads/${id}/ffb-quote`).catch(() => null)
+    : null;
+
   const titleEl = document.getElementById('topbar-title');
   if (titleEl) titleEl.textContent = lead.customer_name;
 
@@ -622,6 +628,8 @@ export async function renderSalesLeadDetail(el, id) {
           </div>
         </div>
 
+        ${ffbQuoteCardHtml(quote)}
+
         ${leadFilesCardHtml(base, lead.files)}
       </div>
 
@@ -638,6 +646,14 @@ export async function renderSalesLeadDetail(el, id) {
   document.getElementById('convert-btn')?.addEventListener('click', () => openConvertForm(lead, reload));
   document.getElementById('workorder-btn')?.addEventListener('click', () => openWorkOrderForm(lead, reload));
   bindPrintButtons('lead-pdf', `${base}/pdf`, `${ffb ? 'forfragan' : 'offert'}-${id}.pdf`);
+
+  document.getElementById('ffbq-edit-btn')?.addEventListener('click',
+    () => openFfbQuoteForm(id, lead.customer_id, quote, reload));
+  document.getElementById('ffbq-download-btn')?.addEventListener('click', async () => {
+    const name = `FFB-offertforfragan-${lead.quote_number || id}.pdf`;
+    try { await downloadFile(`${base}/ffb-quote/pdf`, name); }
+    catch (err) { showToast(err.message, 'error'); }
+  });
 
   document.getElementById('archive-lead-btn')?.addEventListener('click', async () => {
     try {
@@ -1360,7 +1376,8 @@ export async function renderSalesOrderDetail(el, id) {
     </div>
     </div>
 
-    ${ffbOrderCardHtml(ffb, (order.files || []).filter(f => f.group_label === 'FFB-beställning'))}
+    ${ffbOrderCardHtml(ffb, (order.files || []).filter(
+      f => f.group_label === 'FFB-beställning' || f.group_label === 'FFB-offertförfrågan'))}
 
     <div id="order-gantt" style="margin-bottom:16px"></div>
 
@@ -1382,7 +1399,7 @@ export async function renderSalesOrderDetail(el, id) {
   document.getElementById('edit-order-btn').addEventListener('click', () => openOrderForm(order, reload));
   bindPrintButtons('order-pdf', `${base}/pdf`, `order-${id}.pdf`);
 
-  document.getElementById('ffb-edit-btn')?.addEventListener('click', () => openFfbOrderForm(id, ffb, reload));
+  document.getElementById('ffb-edit-btn')?.addEventListener('click', () => openFfbOrderForm(id, order.customer_id, ffb, reload));
   document.getElementById('ffb-download-btn')?.addEventListener('click', async () => {
     const name = `FFB-order-${order.order_number || id}.pdf`;
     try { await downloadFile(`${base}/ffb-order/pdf`, name); }
@@ -1709,6 +1726,120 @@ async function openOrderForm(order, onSaved) {
   });
 }
 
+// ── Offertförfrågan till Feldbinder ─────────────────────────────
+
+/** Kortet som ersätter Word-mallen "Quotation Request". Samma upplägg som
+ *  FFB-beställningen på ordern, fast ett steg tidigare i affären. */
+function ffbQuoteCardHtml(quote) {
+  if (!quote) return '';
+  const reviewed = !!quote.updated_by;
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <span class="card-title">FFB-offertförfrågan</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:${reviewed ? 'var(--text-2)' : 'var(--accent)'}">
+            ${reviewed ? 'Granskad' : 'Förifylld – ej granskad'}
+          </span>
+          <button class="btn btn-secondary btn-sm" id="ffbq-edit-btn">Redigera</button>
+          <button class="btn btn-primary btn-sm" id="ffbq-download-btn">Ladda ner PDF</button>
+        </div>
+      </div>
+      <div class="card-body order-meta">
+        ${metaRow('Typ', quote.product_type)}
+        ${metaRow('Volume approx.', quote.volume_approx)}
+        ${metaRow('Transport of', quote.transport_of)}
+        ${metaRow('Chassi', quote.chassis_make)}
+        ${metaRow('According to drawing', quote.drawing_number)}
+        ${metaRow('Contact pers', quote.contact_person)}
+      </div>
+    </div>`;
+}
+
+/** Fälten följer mallens indelning. Till skillnad från beställningen finns här
+ *  inga antal, offertnummer eller leveranstider – de är inte bestämda när man
+ *  ber om ett pris. */
+function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
+  const f = (name, label, opts = {}) => `
+    <div class="field">
+      <label>${esc(label)}</label>
+      <input type="${opts.type || 'text'}" name="${name}" value="${esc(quote[name])}">
+    </div>`;
+
+  openModal({
+    title: 'FFB-offertförfrågan',
+    size: 'modal-lg',
+    body: `
+      <form id="ffbq-form">
+        <div class="form-row">
+          ${f('doc_date', 'Date', { type: 'date' })}
+        </div>
+
+        <hr class="divider">
+        <div class="field">
+          <label>Kunduppgifter</label>
+          <p style="font-size:13px;color:var(--text-2);margin:0 0 6px">
+            ${[quote.customer_name, quote.address, quote.postal_city, quote.country]
+                .filter(Boolean).map(esc).join(' · ') || 'Inga uppgifter på kunden'}<br>
+            ${[quote.phone, quote.email, quote.contact_person].filter(Boolean).map(esc).join(' · ')}
+          </p>
+          <p style="font-size:12px;color:var(--text-3);margin:0">
+            Hämtas från <a href="#/customers/${customerId}" style="color:var(--accent)">kundkortet</a>
+            och kontaktpersonen på förfrågan – ändra dem där så slår det igenom här.
+          </p>
+        </div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('product_type', 'Typ')}
+          ${f('volume_approx', 'Volume approx.')}
+          ${f('transport_of', 'Transport of')}
+          ${f('country_of_registration', 'Country of registration')}
+        </div>
+        <div class="form-row">
+          ${f('drawing_number', 'According to drawing')}
+        </div>
+        <div class="field"><label>Special feature</label><input type="text" name="special_feature" value="${esc(quote.special_feature)}"></div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('chassis_make', 'Chassi')}
+          ${f('wheel_base', 'Wheel base')}
+          ${f('fo_number', 'FO Number')}
+        </div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('terms_payment', 'Terms of Payment')}
+          ${f('terms_delivery', 'Terms of Delivery')}
+        </div>
+
+        <div class="field">
+          <label>Quotation request text</label>
+          <textarea name="request_text" rows="6">${esc(quote.request_text)}</textarea>
+        </div>
+
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">Spara</button>
+        </div>
+      </form>`,
+  });
+
+  document.getElementById('ffbq-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {};
+    for (const [k, v] of fd.entries()) body[k] = v === '' ? null : v;
+    try {
+      await api.put(`/sales/leads/${leadId}/ffb-quote`, body);
+      showToast('Offertförfrågan sparad – PDF:en ligger som bilaga på förfrågan', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
 // ── Beställning till Feldbinder ─────────────────────────────────
 
 /** Kortet som ersätter Word-mallen. API:et förifyller beställningen ur ordern,
@@ -1736,6 +1867,7 @@ function ffbOrderCardHtml(ffb, files) {
         ${metaRow('Contact pers', ffb.contact_person)}
         ${metaRow('Chassi', ffb.chassis_make)}
         ${metaRow('According to drawing', ffb.drawing_number)}
+        ${files.length ? '<hr class="divider"><div style="font-size:12px;color:var(--text-3);margin-bottom:6px">Dokument som skickats till FFB</div>' : ''}
         ${sectionFilesHtml(files)}
       </div>
     </div>`;
@@ -1744,7 +1876,7 @@ function ffbOrderCardHtml(ffb, files) {
 /** Fälten följer Word-mallens indelning så att den som fyllt i den förut
  *  känner igen sig. Allt är fritext – mallens rutor rymmer både "1 pc" och
  *  "ASAP" lika gärna som ett antal eller ett datum. */
-function openFfbOrderForm(orderId, ffb, onSaved) {
+function openFfbOrderForm(orderId, customerId, ffb, onSaved) {
   const f = (name, label, opts = {}) => `
     <div class="field">
       <label>${esc(label)}</label>
@@ -1758,21 +1890,20 @@ function openFfbOrderForm(orderId, ffb, onSaved) {
       <form id="ffb-form">
         <div class="form-row">
           ${f('doc_date', 'Date', { type: 'date' })}
-          ${f('vat_number', 'VAT nr')}
-          ${f('customer_number', 'Customer nr')}
         </div>
 
         <hr class="divider">
-        <div class="form-row">
-          ${f('customer_name', 'Customer')}
-          ${f('address', 'Adress')}
-          ${f('postal_city', 'Postnummer/Stad')}
-        </div>
-        <div class="form-row">
-          ${f('country', 'Country')}
-          ${f('phone', 'Phone')}
-          ${f('email', 'Mail')}
-          ${f('contact_person', 'Contact pers')}
+        <div class="field">
+          <label>Kunduppgifter</label>
+          <p style="font-size:13px;color:var(--text-2);margin:0 0 6px">
+            ${[ffb.customer_name, ffb.address, ffb.postal_city, ffb.country]
+                .filter(Boolean).map(esc).join(' · ') || 'Inga uppgifter på kunden'}<br>
+            ${[ffb.phone, ffb.email, ffb.contact_person].filter(Boolean).map(esc).join(' · ')}
+          </p>
+          <p style="font-size:12px;color:var(--text-3);margin:0">
+            Hämtas från <a href="#/customers/${customerId}" style="color:var(--accent)">kundkortet</a>
+            och kontaktpersonen på förfrågan – ändra dem där så slår det igenom här.
+          </p>
         </div>
 
         <hr class="divider">

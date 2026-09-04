@@ -833,6 +833,7 @@ class SalesLeadNoteOut(BaseModel):
 class SalesLeadFileOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    group_label: Optional[str] = None
     original_name: str
     mime_type: Optional[str]
     size_bytes: Optional[int]
@@ -1128,18 +1129,12 @@ class SalesLeadToWorkOrder(BaseModel):
 # ── FFB-beställning ───────────────────────────────────────────────────────────
 
 class FfbOrderUpdate(BaseModel):
-    """Allt på beställningen får redigeras – fälten speglar Word-mallens rutor."""
-    doc_date: Optional[date] = None
+    """Beställningens egna fält – de speglar Word-mallens rutor.
 
-    vat_number: Optional[str] = None
-    customer_number: Optional[str] = None
-    customer_name: Optional[str] = None
-    address: Optional[str] = None
-    postal_city: Optional[str] = None
-    country: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    contact_person: Optional[str] = None
+    Kundblocket saknas med flit: namn, adress, VAT, land, telefon, mail och
+    kontaktperson hämtas ur kunden och ändras därför på kundkortet.
+    """
+    doc_date: Optional[date] = None
 
     quantity: Optional[str] = None
     quotation_number: Optional[str] = None
@@ -1171,6 +1166,61 @@ class FfbOrderOut(FfbOrderUpdate):
     # Tomt så länge ingen har sparat beställningen – vyn visar den som ogranskad
     updated_by: Optional[int] = None
     updated_at: Optional[datetime] = None
+
+    # Hämtas ur kunden och förfrågan vid varje läsning. Går inte att skriva till
+    # via API:et – de ändras på kundkortet respektive förfrågan.
+    vat_number: Optional[str] = None
+    customer_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    address: Optional[str] = None
+    postal_city: Optional[str] = None
+    country: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    contact_person: Optional[str] = None
+
+
+# ── FFB-offertförfrågan ───────────────────────────────────────────────────────
+
+class FfbQuoteUpdate(BaseModel):
+    """Offertförfrågans egna fält. Kundblocket saknas med flit – det hämtas ur
+    kunden, precis som på beställningen."""
+    doc_date: Optional[date] = None
+
+    product_type: Optional[str] = None
+    volume_approx: Optional[str] = None
+    transport_of: Optional[str] = None
+    country_of_registration: Optional[str] = None
+    drawing_number: Optional[str] = None
+    special_feature: Optional[str] = None
+
+    chassis_make: Optional[str] = None
+    wheel_base: Optional[str] = None
+    fo_number: Optional[str] = None
+
+    terms_payment: Optional[str] = None
+    terms_delivery: Optional[str] = None
+
+    request_text: Optional[str] = None
+
+
+class FfbQuoteOut(FfbQuoteUpdate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    lead_id: int
+    updated_by: Optional[int] = None
+    updated_at: Optional[datetime] = None
+
+    # Hämtas ur kunden och förfrågan vid varje läsning
+    vat_number: Optional[str] = None
+    customer_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    address: Optional[str] = None
+    postal_city: Optional[str] = None
+    country: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    contact_person: Optional[str] = None
 
 
 Token.model_rebuild()

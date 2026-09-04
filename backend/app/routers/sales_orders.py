@@ -24,6 +24,7 @@ from ..schemas import (
 )
 from ..sales_common import contact_fields, activity_out, order_schedule, next_activity_sort
 from ..sales_pdf import build_order_pdf
+from .ffb_orders import ensure_documents
 from ..uploads import store_file, file_path, remove_file
 
 router = APIRouter(prefix="/api/sales/orders", tags=["sales-orders"])
@@ -522,13 +523,20 @@ def delete_order_file(
 # ── Arkivering ────────────────────────────────────────────────────────────────
 
 @router.post("/{order_id}/archive", response_model=SalesOrderOut)
-def archive_order(order_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def archive_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     """Avslutar ordern. Den försvinner ur Sålda ordrar och hamnar under Arkiv,
     men räknas fortfarande med i provisionen."""
     order = _get(db, order_id)
     if order.archived_at is None:
         order.archived_at = datetime.utcnow()
         db.commit()
+    # Arkivet är historiken: FFB-dokumenten ska ligga kvar på ordern även om
+    # förfrågan senare ändras eller ingen hunnit öppna beställningen
+    ensure_documents(db, order, current_user.id)
     return order_out(db, order_id)
 
 

@@ -23,6 +23,7 @@ from ..schemas import (
     TaskCreate, TaskUpdate, TaskOut,
 )
 from ..sales_common import contact_fields, activity_out, lead_schedule, next_activity_sort
+from .ffb_orders import copy_quote_document
 from ..sales_pdf import build_lead_pdf, build_lead_tasks_pdf
 from ..uploads import store_file, file_path, remove_file, copy_file
 from .sales_orders import order_out, UPLOAD_ROOT as ORDER_UPLOAD_ROOT
@@ -268,6 +269,15 @@ def update_lead(
         )
     for field, value in fields.items():
         setattr(lead, field, value)
+
+    # Ordern är samma affär som förfrågan och ska peka på samma kund. Byter man
+    # kund efter att affären sålts måste ordern följa med, annars ligger den
+    # kvar under fel kund i ordervyn, provisionen och FFB-beställningen.
+    if "customer_id" in fields:
+        db.query(SalesOrder).filter(SalesOrder.lead_id == lead.id).update(
+            {SalesOrder.customer_id: lead.customer_id}, synchronize_session=False
+        )
+
     db.commit()
     return _out(db, _get(db, lead_id))
 
@@ -493,7 +503,7 @@ def convert_to_order(
     lead_id: int,
     body: SalesLeadConvert = SalesLeadConvert(),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
     """Markerar förfrågan som såld och skapar orderraden – motsvarar flytten från
     fliken "Offertförfrågan Lista" till årsfliken i kundens Excel."""
@@ -527,6 +537,10 @@ def convert_to_order(
     lead.status = SalesLeadStatus.sald
     lead.next_followup_date = None
     db.commit()
+
+    # Offertförfrågan som gick till FFB följer med ordern som historik. Den
+    # ligger kvar på förfrågan också – det här är en kopia.
+    copy_quote_document(db, order, current_user.id)
     return order_out(db, order.id)
 
 

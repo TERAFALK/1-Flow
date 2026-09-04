@@ -10,7 +10,8 @@ from .routers import (
     auth, users, customers, vehicles, articles,
     work_orders, time_entries, dashboard,
     settings, contacts, phases, purchases, files, activities, tasks,
-    pick_lists, sales_leads, sales_orders, sales_milestones, ffb_orders, notes,
+    pick_lists, sales_leads, sales_orders, sales_milestones, ffb_orders, ffb_quotes,
+    notes,
 )
 
 models.Base.metadata.create_all(bind=engine)
@@ -365,15 +366,6 @@ def _run_migrations():
             id SERIAL PRIMARY KEY,
             order_id INTEGER NOT NULL UNIQUE REFERENCES sales_orders(id) ON DELETE CASCADE,
             doc_date DATE,
-            vat_number VARCHAR,
-            customer_number VARCHAR,
-            customer_name VARCHAR,
-            address VARCHAR,
-            postal_city VARCHAR,
-            country VARCHAR,
-            phone VARCHAR,
-            email VARCHAR,
-            contact_person VARCHAR,
             quantity VARCHAR,
             quotation_number VARCHAR,
             delivery_time VARCHAR,
@@ -397,6 +389,44 @@ def _run_migrations():
             updated_at TIMESTAMP DEFAULT NOW()
         )""",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_ffb_orders_order_id ON ffb_orders (order_id)",
+        # Kundblocket låg först som kopierade kolumner här. Det visade sig fel:
+        # rättade kunduppgifter slog aldrig igenom på beställningen. Numera
+        # hämtas de ur kunden vid läsning, så kolumnerna städas bort.
+        *[
+            f"ALTER TABLE ffb_orders DROP COLUMN IF EXISTS {col}"
+            for col in (
+                "vat_number", "customer_number", "customer_name", "address",
+                "postal_city", "country", "phone", "email", "contact_person",
+            )
+        ],
+        # ── Offertförfrågan till Feldbinder ───────────────────────────────────
+        # Samma dokument ett steg tidigare: skickas för att få ett pris, innan
+        # affären finns. Hänger på förfrågan och bara på feldbinder-sorten.
+        """CREATE TABLE IF NOT EXISTS ffb_quotes (
+            id SERIAL PRIMARY KEY,
+            lead_id INTEGER NOT NULL UNIQUE REFERENCES sales_leads(id) ON DELETE CASCADE,
+            doc_date DATE,
+            product_type VARCHAR,
+            volume_approx VARCHAR,
+            transport_of VARCHAR,
+            country_of_registration VARCHAR,
+            drawing_number VARCHAR,
+            special_feature VARCHAR,
+            chassis_make VARCHAR,
+            wheel_base VARCHAR,
+            fo_number VARCHAR,
+            terms_payment VARCHAR,
+            terms_delivery VARCHAR,
+            request_text TEXT,
+            updated_by INTEGER REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_ffb_quotes_lead_id ON ffb_quotes (lead_id)",
+        # Förfrågans bilagor får samma gruppetikett som orderns, så att den
+        # PDF Flow själv genererar går att hitta och ersätta.
+        "ALTER TABLE sales_lead_files ADD COLUMN IF NOT EXISTS group_label VARCHAR",
+        "CREATE INDEX IF NOT EXISTS ix_sales_lead_files_group ON sales_lead_files (group_label)",
     ]
     with engine.connect() as conn:
         for stmt in stmts:
@@ -526,6 +556,7 @@ app.include_router(sales_leads.router)
 app.include_router(sales_orders.router)
 app.include_router(sales_milestones.router)
 app.include_router(ffb_orders.router)
+app.include_router(ffb_quotes.router)
 
 
 @app.on_event("startup")

@@ -386,5 +386,8 @@ if (isPrimaryInstance) document.addEventListener('DOMContentLoaded', async () =>
   window.addEventListener('hashchange', route);
 
   // Make closeModal global for inline onclick handlers
-  window.closeModal = (await import('./components/modal.js')).closeModal;
+  // requestClose och inte closeModal: knapparna i formulärens sidfot går hit,
+  // och de ska fråga innan de kastar ändringar. Koden som stänger efter en
+  // lyckad sparning importerar closeModal direkt och påverkas inte.
+  window.closeModal = (await import('./components/modal.js')).requestClose;
 });

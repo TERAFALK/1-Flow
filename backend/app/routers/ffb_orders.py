@@ -6,7 +6,6 @@ laddas ner som PDF. Den senast sparade versionen läggs som bilaga på ordern s�
 att det går att se vad som skickades till FFB.
 """
 from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -14,15 +13,19 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..deps import require_admin
-from ..ffb_order_pdf import build_ffb_order_pdf
-from ..models import FfbOrder, SalesLead, SalesOrder, SalesOrderFile, User
+from ..ffb_pdf import build_ffb_order_pdf
+from ..models import FfbOrder, SalesLead, SalesLeadFile, SalesOrder, SalesOrderFile, User
 from ..schemas import FfbOrderOut, FfbOrderUpdate
-from ..uploads import remove_file, store_file
+from ..sales_common import ffb_customer_block
+from ..uploads import copy_file, remove_file, safe_filename, store_file
 
 router = APIRouter(prefix="/api/sales/orders/{order_id}/ffb-order", tags=["ffb-orders"])
 
 UPLOAD_ROOT = "/app/uploads/sales-orders"
+LEAD_UPLOAD_ROOT = "/app/uploads/sales-leads"
 FILE_GROUP = "FFB-beställning"
+# Samma etikett som på förfrågan, så att den kopierade filen känns igen
+QUOTE_GROUP = "FFB-offertförfrågan"
 
 # Står förtryckta i mallen, men ska gå att ändra per beställning
 DEFAULT_TERMS_PAYMENT = "10% Down payment, 90% on completion without deduction"
@@ -44,35 +47,32 @@ def _get_order(db: Session, order_id: int) -> SalesOrder:
     return order
 
 
-def _join(*parts) -> Optional[str]:
-    """Slår ihop delar till en rad och hoppar över de tomma."""
-    joined = " ".join(str(p).strip() for p in parts if p and str(p).strip())
-    return joined or None
+def customer_block(order: SalesOrder) -> dict:
+    """Kundblocket för den här ordern – kunden plus förfrågans kontaktperson."""
+    return ffb_customer_block(order.customer, order.lead.contact_person if order.lead else None)
+
+
+def pdf_name(order: SalesOrder) -> str:
+    return safe_filename(f"FFB-order-{order.order_number or order.id}") + ".pdf"
+
+
+def _out(order: SalesOrder, ffb: FfbOrder) -> FfbOrderOut:
+    """Beställningens egna fält plus kundblocket som det ser ut just nu."""
+    return FfbOrderOut.model_validate(ffb).model_copy(update=customer_block(order))
 
 
 def _prefill(order: SalesOrder) -> FfbOrder:
     """Beställningen som den ser ut innan kunden justerat något.
 
     Allt vi redan vet fylls i; resten (chassi, ritningsnummer, transportmedium)
-    finns inte i Flow och lämnas tomt åt kunden. Kontaktpersonens uppgifter går
-    före kundens, precis som i ``sales_common.contact_fields``.
+    finns inte i Flow och lämnas tomt åt kunden.
     """
     customer = order.customer
     lead = order.lead
-    contact = lead.contact_person if lead else None
 
     return FfbOrder(
         order_id=order.id,
         doc_date=date.today(),
-        vat_number=(customer.vat_number or customer.org_number) if customer else None,
-        customer_number=customer.ffb_customer_number if customer else None,
-        customer_name=customer.name if customer else None,
-        address=customer.address if customer else None,
-        postal_city=_join(customer.postal_code, customer.city) if customer else None,
-        country=customer.country if customer else None,
-        phone=(contact.phone if contact else None) or (customer.phone if customer else None),
-        email=(contact.email if contact else None) or (customer.email if customer else None),
-        contact_person=contact.name if contact else None,
         quantity=str(lead.quantity) if lead and lead.quantity else None,
         quotation_number=(lead.quote_number if lead else None) or order.order_number,
         # Veckan är det kunden själv skriver in i ordern, annars planerat datum
@@ -101,14 +101,14 @@ def _get_or_create(db: Session, order: SalesOrder) -> FfbOrder:
     return ffb
 
 
-def _store_pdf(db: Session, order: SalesOrder, ffb: FfbOrder, user: User) -> None:
+def _store_pdf(db: Session, order: SalesOrder, ffb: FfbOrder, user_id) -> None:
     """Sparar beställningen som bilaga på ordern och ersätter den förra.
 
     En fil per order, inte en hög versioner: bilagan ska visa vad beställningen
     innehåller nu, och den som vill se historiken har anteckningarna.
     """
-    name = f"FFB-order-{order.order_number or order.id}.pdf"
-    content = build_ffb_order_pdf(ffb).getvalue()
+    name = pdf_name(order)
+    content = build_ffb_order_pdf(ffb, customer_block(order)).getvalue()
 
     previous = (
         db.query(SalesOrderFile)
@@ -127,9 +127,66 @@ def _store_pdf(db: Session, order: SalesOrder, ffb: FfbOrder, user: User) -> Non
         original_name=name,
         mime_type="application/pdf",
         size_bytes=len(content),
-        uploaded_by=user.id,
+        uploaded_by=user_id,
     ))
     db.commit()
+
+
+def _groups(db: Session, order_id: int) -> set:
+    return {
+        f.group_label
+        for f in db.query(SalesOrderFile).filter(SalesOrderFile.order_id == order_id).all()
+    }
+
+
+def copy_quote_document(db: Session, order: SalesOrder, user_id) -> None:
+    """Lägger offertförfrågan som gick till FFB på ordern som historik.
+
+    Dokumentet skapas på förfrågan och kopieras hit när affären säljs, så att
+    ordern bär hela kedjan på egen hand. Originalet ligger kvar på förfrågan.
+    Har ingen begärt något pris via Flow finns det inget att kopiera.
+    """
+    if order.lead_id is None or QUOTE_GROUP in _groups(db, order.id):
+        return
+
+    source = (
+        db.query(SalesLeadFile)
+        .filter(
+            SalesLeadFile.lead_id == order.lead_id,
+            SalesLeadFile.group_label == QUOTE_GROUP,
+        )
+        .first()
+    )
+    if not source:
+        return
+
+    # Kopia och inte flytt: originalet ska ligga kvar på förfrågan
+    stored_name = copy_file(LEAD_UPLOAD_ROOT, order.lead_id, UPLOAD_ROOT, order.id, source.filename)
+    if not stored_name:
+        return
+    db.add(SalesOrderFile(
+        order_id=order.id,
+        group_label=QUOTE_GROUP,
+        filename=stored_name,
+        original_name=source.original_name,
+        mime_type=source.mime_type,
+        size_bytes=source.size_bytes,
+        uploaded_by=user_id,
+    ))
+    db.commit()
+
+
+def ensure_documents(db: Session, order: SalesOrder, user_id) -> None:
+    """Båda FFB-dokumenten som bilagor på ordern. Anropas vid arkivering.
+
+    Arkivet är historiken, så ordern ska bära dokumenten på egen hand: dels
+    offertförfrågan från förfrågan, dels beställningen. Beställningen genereras
+    om den saknas – en såld feldbinder-affär har alltid en, även om ingen hunnit
+    öppna formuläret och spara.
+    """
+    copy_quote_document(db, order, user_id)
+    if FILE_GROUP not in _groups(db, order.id):
+        _store_pdf(db, order, _get_or_create(db, order), user_id)
 
 
 @router.get("", response_model=FfbOrderOut)
@@ -139,7 +196,7 @@ def get_ffb_order(
     _: User = Depends(require_admin),
 ):
     order = _get_order(db, order_id)
-    return _get_or_create(db, order)
+    return _out(order, _get_or_create(db, order))
 
 
 @router.put("", response_model=FfbOrderOut)
@@ -158,9 +215,9 @@ def update_ffb_order(
     db.refresh(ffb)
     # Bilagan regenereras här så att den arkiverade filen alltid stämmer med
     # det som står i formuläret – nedladdningen blir då en ren GET.
-    _store_pdf(db, order, ffb, current_user)
+    _store_pdf(db, order, ffb, current_user.id)
     db.refresh(ffb)
-    return ffb
+    return _out(order, ffb)
 
 
 @router.get("/pdf")
@@ -171,9 +228,8 @@ def ffb_order_pdf(
 ):
     order = _get_order(db, order_id)
     ffb = _get_or_create(db, order)
-    filename = f"FFB-order-{order.order_number or order.id}.pdf"
     return StreamingResponse(
-        build_ffb_order_pdf(ffb),
+        build_ffb_order_pdf(ffb, customer_block(order)),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{pdf_name(order)}"'},
     )

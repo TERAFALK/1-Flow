@@ -1,8 +1,16 @@
 const overlay = () => document.getElementById('modal-overlay');
 const box = () => document.getElementById('modal-box');
 
-function onEscape(e) { if (e.key === 'Escape') closeModal(); }
-function onOverlayClick(e) { if (e.target === overlay()) closeModal(); }
+// Sätts så fort användaren rör ett fält i modalen och nollas när den stängs.
+// Programmatisk ifyllnad (kontaktpersoner som laddas in, förvald ansvarig,
+// combobox-texten som synkas vid start) sätter värden utan att skicka event,
+// så allt som når markDirty kommer från användaren.
+let dirty = false;
+
+function markDirty() { dirty = true; }
+
+function onEscape(e) { if (e.key === 'Escape') requestClose(); }
+function onOverlayClick(e) { if (e.target === overlay()) requestClose(); }
 
 export function openModal({ title, body, size = '', onClose } = {}) {
   const b = box();
@@ -20,26 +28,80 @@ export function openModal({ title, body, size = '', onClose } = {}) {
     b.querySelector('.modal-body').appendChild(body);
   }
   overlay().classList.remove('hidden');
+  dirty = false;
 
-  document.getElementById('modal-close-btn').addEventListener('click', () => closeModal());
+  document.getElementById('modal-close-btn').addEventListener('click', () => requestClose());
   // Named handlers: addEventListener dedupes same function reference, so
   // repeated openModal calls never stack listeners, and closeModal can remove them.
   overlay().addEventListener('click', onOverlayClick);
   document.addEventListener('keydown', onEscape);
+  // Ligger på lådan och inte på formuläret – innehållet byts ut vid varje
+  // öppning, men lådan är samma element hela tiden.
+  b.addEventListener('input', markDirty);
+  b.addEventListener('change', markDirty);
 
   overlay()._onClose = onClose || null;
 }
 
+/** Stänger utan att fråga. Används av koden som redan sparat. */
 export function closeModal() {
   const o = overlay();
   if (o.classList.contains('hidden')) return;
   const cb = o._onClose;
   o._onClose = null;
+  dirty = false;
   o.classList.add('hidden');
   box().innerHTML = '';
   o.removeEventListener('click', onOverlayClick);
   document.removeEventListener('keydown', onEscape);
   if (cb) cb();
+}
+
+/**
+ * Stängning på användarens initiativ: klick utanför, Escape, krysset eller
+ * Avbryt. Har något ändrats frågar vi först – ett tappat klick utanför ska
+ * inte kasta ett halvifyllt formulär.
+ *
+ * Det är den här som ligger på window.closeModal, alltså den som alla
+ * `onclick="closeModal()"` i formulärens sidfot når.
+ */
+export function requestClose() {
+  if (!dirty) return closeModal();
+  showUnsavedGuard();
+}
+
+function showUnsavedGuard() {
+  const b = box();
+  if (b.querySelector('.modal-guard')) return;   // redan frågat
+
+  const form = b.querySelector('form');
+  const layer = document.createElement('div');
+  layer.className = 'modal-guard';
+  layer.innerHTML = `
+    <div class="modal-guard-panel">
+      <p class="modal-guard-title">Spara ändringarna?</p>
+      <p class="modal-guard-text">Du har ändringar som inte är sparade.</p>
+      <div class="modal-guard-actions">
+        <button type="button" class="btn btn-secondary" data-guard="cancel">Fortsätt redigera</button>
+        <button type="button" class="btn btn-secondary" data-guard="discard">Kasta ändringar</button>
+        ${form ? '<button type="button" class="btn btn-primary" data-guard="save">Spara</button>' : ''}
+      </div>
+    </div>`;
+  b.appendChild(layer);
+
+  layer.addEventListener('click', (e) => {
+    const action = e.target.closest('[data-guard]')?.dataset.guard;
+    if (!action) return;
+    if (action === 'cancel') { layer.remove(); return; }
+    if (action === 'discard') { closeModal(); return; }
+    // Spara: formulärets egen submit-hanterare sparar och stänger modalen.
+    // Går sparningen fel ligger formuläret kvar ifyllt och är fortfarande
+    // ändrat, så nästa försök att stänga frågar igen.
+    layer.remove();
+    form.requestSubmit();
+  });
+
+  layer.querySelector('[data-guard="cancel"]').focus();
 }
 
 export function modalBody() {

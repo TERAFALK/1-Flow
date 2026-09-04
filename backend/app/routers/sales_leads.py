@@ -114,6 +114,7 @@ def _out(db: Session, lead: SalesLead) -> SalesLeadOut:
     return SalesLeadOut(
         **_base_fields(lead),
         contact_person_id=lead.contact_person_id,
+        assigned_to=lead.assigned_to,
         external_link=lead.external_link,
         lost_reason=lead.lost_reason,
         notes=lead.notes,

@@ -914,6 +914,9 @@ class SalesLeadListItem(BaseModel):
 
 class SalesLeadOut(SalesLeadListItem):
     contact_person_id: Optional[int] = None
+    # Listan visar bara namnet, men redigeringsformuläret behöver id:t för att
+    # kunna förvälja ansvarig – utan det nollades fältet vid varje sparning
+    assigned_to: Optional[int] = None
     external_link: Optional[str] = None
     lost_reason: Optional[str] = None
     notes: Optional[str] = None

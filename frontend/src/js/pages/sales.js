@@ -942,7 +942,7 @@ export async function openLeadForm(lead, onSaved, area = null) {
       </form>`,
   });
 
-  // Ansvarig sätts efter render – lead saknar assigned_to i listvyn men har det i detaljvyn
+  // Ansvarig väljs efter render eftersom optionerna byggs ovan
   const assignedSel = document.querySelector('#lead-form [name="assigned_to"]');
   if (lead?.assigned_to) assignedSel.value = String(lead.assigned_to);
 

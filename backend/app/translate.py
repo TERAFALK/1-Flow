@@ -19,7 +19,20 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
+def _read_key() -> str:
+    """Nyckeln ur miljön, städad.
+
+    Citattecken tas bort: skriver man DEEPL_API_KEY="abc:fx" i .env följer de
+    med in i värdet. Då slutar nyckeln inte längre på ":fx", anropet går till
+    fel värd och DeepL svarar 403 – ett fel som är svårt att gissa sig till.
+    """
+    raw = os.getenv("DEEPL_API_KEY", "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        raw = raw[1:-1].strip()
+    return raw
+
+
+API_KEY = _read_key()
 TIMEOUT = 15
 
 
@@ -31,11 +44,14 @@ def is_configured() -> bool:
     return bool(API_KEY)
 
 
-def _endpoint() -> str:
+def _host() -> str:
     # Gratisnycklar slutar på ":fx" och går mot en annan värd. Att läsa av det
     # ur nyckeln sparar en inställning som ändå bara kan sättas fel.
-    host = "api-free.deepl.com" if API_KEY.endswith(":fx") else "api.deepl.com"
-    return f"https://{host}/v2/translate"
+    return "api-free.deepl.com" if API_KEY.endswith(":fx") else "api.deepl.com"
+
+
+def _endpoint() -> str:
+    return f"https://{_host()}/v2/translate"
 
 
 def translate_html(texts: list, target_lang: str = "SV") -> list:
@@ -89,8 +105,17 @@ def translate_html(texts: list, target_lang: str = "SV") -> list:
 
 
 def _http_message(code: int) -> str:
+    # 403 betyder både "fel nyckel" och "rätt nyckel mot fel värd", så värden
+    # och nyckelns slut nämns: slutar den på ":fx" ska anropet gå till
+    # api-free, annars till api.deepl.com. Nyckeln själv skrivs aldrig ut.
+    if code == 403:
+        return (
+            f"DeepL nekade nyckeln (anropet gick till {_host()}). "
+            f"Nyckeln är {len(API_KEY)} tecken och slutar "
+            f"{'på :fx' if API_KEY.endswith(':fx') else 'inte på :fx'} – "
+            "kontrollera att DEEPL_API_KEY är rätt kopierad och utan citattecken."
+        )
     return {
-        403: "DeepL nekade nyckeln – kontrollera DEEPL_API_KEY",
         429: "För många anrop till DeepL just nu, försök igen om en stund",
         456: "DeepL-kvoten är slut för den här månaden",
     }.get(code, f"DeepL svarade med fel {code}")

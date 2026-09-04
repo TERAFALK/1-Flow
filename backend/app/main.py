@@ -427,6 +427,9 @@ def _run_migrations():
         # PDF Flow själv genererar går att hitta och ersätta.
         "ALTER TABLE sales_lead_files ADD COLUMN IF NOT EXISTS group_label VARCHAR",
         "CREATE INDEX IF NOT EXISTS ix_sales_lead_files_group ON sales_lead_files (group_label)",
+        # Svensk version av offertförfrågans fritext, för den svenska utskriften
+        "ALTER TABLE ffb_quotes ADD COLUMN IF NOT EXISTS request_text_sv TEXT",
+        "ALTER TABLE ffb_quotes ADD COLUMN IF NOT EXISTS special_feature_sv VARCHAR",
     ]
     with engine.connect() as conn:
         for stmt in stmts:

@@ -15,6 +15,7 @@ from ..database import get_db
 from ..deps import require_admin
 from ..ffb_pdf import build_ffb_quote_pdf
 from ..models import FfbQuote, SalesLead, SalesLeadFile, SalesLeadKind, User
+from .. import translate
 from ..sales_common import ffb_customer_block
 from ..schemas import FfbQuoteOut, FfbQuoteUpdate
 from ..uploads import remove_file, safe_filename, store_file
@@ -52,7 +53,10 @@ def customer_block(lead: SalesLead) -> dict:
 
 def _out(lead: SalesLead, quote: FfbQuote) -> FfbQuoteOut:
     """Förfrågans egna fält plus kundblocket som det ser ut just nu."""
-    return FfbQuoteOut.model_validate(quote).model_copy(update=customer_block(lead))
+    return FfbQuoteOut.model_validate(quote).model_copy(update={
+        **customer_block(lead),
+        "translation_available": translate.is_configured(),
+    })
 
 
 def _prefill(lead: SalesLead) -> FfbQuote:
@@ -148,6 +152,36 @@ def update_ffb_quote(
     # Bilagan regenereras här så att den arkiverade filen alltid stämmer med
     # det som står i formuläret – nedladdningen blir då en ren GET.
     store_quote_pdf(db, lead, quote, current_user.id)
+    db.refresh(quote)
+    return _out(lead, quote)
+
+
+@router.post("/translate", response_model=FfbQuoteOut)
+def translate_ffb_quote(
+    lead_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Fyller de svenska fritextfälten med en översättning av originalen.
+
+    Skriver över det som stod där förut – knappen är uttrycklig, och den som
+    trycker vill ha en ny översättning. Texten går till DeepL först här, aldrig
+    när dokumentet hämtas.
+    """
+    lead = _get_lead(db, lead_id)
+    quote = _get_or_create(db, lead)
+
+    try:
+        request_sv, special_sv = translate.translate_html(
+            [quote.request_text or "", quote.special_feature or ""]
+        )
+    except translate.TranslationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    quote.request_text_sv = request_sv or None
+    quote.special_feature_sv = special_sv or None
+    quote.updated_by = current_user.id
+    db.commit()
     db.refresh(quote)
     return _out(lead, quote)
 

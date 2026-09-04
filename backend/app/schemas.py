@@ -1202,12 +1202,17 @@ class FfbQuoteUpdate(BaseModel):
     terms_delivery: Optional[str] = None
 
     request_text: Optional[str] = None
+    # Svensk version av fritexten – fylls av översättningsknappen, redigerbar
+    request_text_sv: Optional[str] = None
+    special_feature_sv: Optional[str] = None
 
 
 class FfbQuoteOut(FfbQuoteUpdate):
     model_config = ConfigDict(from_attributes=True)
     id: int
     lead_id: int
+    # Om servern saknar DEEPL_API_KEY döljs översättningsknappen i vyn
+    translation_available: bool = False
     updated_by: Optional[int] = None
     updated_at: Optional[datetime] = None
 

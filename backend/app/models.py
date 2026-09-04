@@ -827,6 +827,13 @@ class FfbQuote(Base):
 
     request_text = Column(Text)
 
+    # Svensk version av fritexten, till den svenska utskriften. Fylls av
+    # översättningsknappen och får sedan rättas för hand – maskinöversatt
+    # tankterminologi behöver läsas igenom innan dokumentet går vidare. Är de
+    # tomma faller den svenska PDF:en tillbaka på originaltexten.
+    request_text_sv = Column(Text)
+    special_feature_sv = Column(String)
+
     updated_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

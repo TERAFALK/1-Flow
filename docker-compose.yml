@@ -28,6 +28,9 @@ services:
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-admin@flow.local}
       FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:-admin}
       FIRST_ADMIN_NAME: ${FIRST_ADMIN_NAME:-Administratör}
+      # Översättning av offertförfrågans fritext till svenska. Utan nyckel är
+      # funktionen avstängd och knappen döljs – resten fungerar som vanligt.
+      DEEPL_API_KEY: ${DEEPL_API_KEY:-}
     volumes:
       - uploads:/app/uploads
     expose:

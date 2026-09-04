@@ -1828,6 +1828,27 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
           ${richTextField('request_text', quote.request_text)}
         </div>
 
+        <hr class="divider">
+        <div class="field">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <label style="margin:0">Svensk version</label>
+            ${quote.translation_available
+              ? `<button type="button" class="btn btn-secondary btn-sm" id="ffbq-translate-btn">Översätt till svenska</button>`
+              : `<span style="font-size:11px;color:var(--text-3)">Automatisk översättning är inte konfigurerad på servern</span>`}
+          </div>
+          <p style="font-size:12px;color:var(--text-3);margin:0 0 8px">
+            Används i den svenska utskriften. Läs igenom översättningen innan den
+            går vidare – tekniska termer blir inte alltid rätt. Lämnas den tom
+            används originaltexten.
+          </p>
+          <label style="font-size:12px">Övrigt (svenska)</label>
+          <input type="text" name="special_feature_sv" value="${esc(quote.special_feature_sv)}">
+        </div>
+        <div class="field">
+          <label style="font-size:12px">Offertförfrågan, text (svenska)</label>
+          ${richTextField('request_text_sv', quote.request_text_sv)}
+        </div>
+
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
           <button type="submit" class="btn btn-primary">Spara</button>
@@ -1836,6 +1857,29 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
   });
 
   bindRichText(document.getElementById('ffbq-form'));
+
+  document.getElementById('ffbq-translate-btn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    // Spara först: det är texten i formuläret som ska översättas, inte den
+    // som råkade ligga sparad när modalen öppnades
+    const fd = new FormData(document.getElementById('ffbq-form'));
+    const body = {};
+    for (const [k, v] of fd.entries()) body[k] = v === '' ? null : v;
+
+    btn.disabled = true;
+    btn.textContent = 'Översätter…';
+    try {
+      await api.put(`/sales/leads/${leadId}/ffb-quote`, body);
+      const updated = await api.post(`/sales/leads/${leadId}/ffb-quote/translate`, {});
+      showToast('Översatt – läs igenom och rätta vid behov', 'success');
+      closeModal();
+      openFfbQuoteForm(leadId, customerId, updated, onSaved);
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Översätt till svenska';
+    }
+  });
 
   document.getElementById('ffbq-form').addEventListener('submit', async (e) => {
     e.preventDefault();

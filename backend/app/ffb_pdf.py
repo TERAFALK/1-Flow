@@ -19,7 +19,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import getAscent, getDescent
 from reportlab.pdfgen import canvas
 
-from .pdf_utils import draw_header, truncate, wrap_lines
+from .pdf_utils import truncate, wrap_lines
 from .richtext import draw_rich_text
 
 MARGIN = 18 * mm
@@ -34,10 +34,10 @@ VALUE_SIZE = 9
 ROW_H = 4.6 * mm           # tätt som mallens 10-punktsrader
 BOX_PAD = 3 * mm           # luft mellan text och ram i villkorsrutan
 
-# Etiketterna på de två språken. Dokumenten till FFB är på engelska som mallen;
-# den svenska varianten är samma uppgifter i ett underlag till slutkunden.
-# Uppsättningen är fast och liten, så den är översatt en gång för hand – ingen
-# maskinöversättning inblandad, och därmed inget som kan bli fel över tid.
+# Etiketterna på de två språken. Engelska är dokumentet som går till FFB;
+# svenska är samma dokument för svensk läsning. Uppsättningen är fast och liten,
+# så den är översatt en gång för hand – ingen maskinöversättning inblandad, och
+# därmed inget som kan bli fel över tid.
 LABELS = {
     "en": {
         "customer": "Customer:", "country": "Country:", "phone": "Phone:",
@@ -113,24 +113,18 @@ def _v(value) -> str:
 class _Doc:
     """Canvas med y-läge, sidhuvud och sidfot.
 
-    ``ffb`` styr avsändaren. Dokumenten som går till Feldbinder bär FFB:s
-    logotyp och deras klassningsrad i sidfoten, precis som mallen. Den svenska
-    kopian går till slutkunden och ska då se ut som ett dokument härifrån – där
-    används Flows eget sidhuvud i stället.
+    Alla varianterna bär FFB:s logotyp – även den svenska. Produkten är
+    Feldbinders, och dokumentet ska kännas igen som deras oavsett språk.
     """
 
-    def __init__(self, title: str, ffb: bool = True):
+    def __init__(self, title: str):
         self.buf = io.BytesIO()
         self.c = canvas.Canvas(self.buf, pagesize=A4)
         self.title = title
-        self.ffb = ffb
         self.y = self._header()
 
     def _header(self) -> float:
         c = self.c
-        if not self.ffb:
-            return draw_header(c, PAGE_W, self.title) - 4 * mm
-
         top = PAGE_H - 15 * mm
         logo = _get_logo()
         if logo:
@@ -146,10 +140,6 @@ class _Doc:
         return top - LOGO_H - 10 * mm
 
     def _footer(self):
-        # "Limited Distribution." är FFB:s egen klassning och hör inte hemma på
-        # ett dokument som går vidare till slutkunden
-        if not self.ffb:
-            return
         self.c.setFont("Helvetica", 7.5)
         self.c.setFillColor(colors.HexColor("#8a8f96"))
         self.c.drawString(MARGIN, 14 * mm, "Limited Distribution.")
@@ -233,7 +223,7 @@ def _build(*, title, doc_date, cust, info_title, info_rows,
            body_title, body_text, lang="en") -> io.BytesIO:
     """Den gemensamma sidan. Skillnaden mellan order och offertförfrågan är
     rubrikerna och vilka rader som står i vänstra spalten."""
-    doc = _Doc(title, ffb=lang == "en")
+    doc = _Doc(title)
     c = doc.c
     L = LABELS[lang]
 
@@ -346,10 +336,14 @@ def build_ffb_quote_pdf(quote, cust: dict, lang: str = "en") -> io.BytesIO:
     de är inte bestämda än när man ber om ett pris.
 
     ``lang="en"`` är dokumentet som går till FFB. ``lang="sv"`` är samma
-    uppgifter som underlag till slutkunden: svenska etiketter, Flows eget
-    sidhuvud och utan FFB:s logotyp och klassningsrad.
+    dokument på svenska – samma FFB-mall, men med svenska etiketter och den
+    översatta fritexten. Har ingen översatt än används originaltexten, så
+    dokumentet går alltid att skriva ut.
     """
     L = LABELS[lang]
+    sv = lang == "sv"
+    special = (quote.special_feature_sv or quote.special_feature) if sv else quote.special_feature
+    body = (quote.request_text_sv or quote.request_text) if sv else quote.request_text
     return _build(
         lang=lang,
         title=L["quotation_title"],
@@ -362,7 +356,7 @@ def build_ffb_quote_pdf(quote, cust: dict, lang: str = "en") -> io.BytesIO:
             (L["transport"], quote.transport_of),
             (L["reg_country"], quote.country_of_registration),
             (L["drawing"], quote.drawing_number),
-            (L["special"], quote.special_feature),
+            (L["special"], special),
         ],
         chassis_rows=[
             (L["chassis"], quote.chassis_make),
@@ -372,5 +366,5 @@ def build_ffb_quote_pdf(quote, cust: dict, lang: str = "en") -> io.BytesIO:
         terms_payment=quote.terms_payment,
         terms_delivery=quote.terms_delivery,
         body_title=L["quotation_text"],
-        body_text=quote.request_text,
+        body_text=body,
     )

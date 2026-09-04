@@ -1,0 +1,5 @@
+# Innehåller lösenord och API-nycklar (DEEPL_API_KEY, SECRET_KEY, databaslösen).
+# .env.example är mallen som ska ligga i repot – den riktiga filen ska aldrig in.
+.env
+.env.*
+!.env.example

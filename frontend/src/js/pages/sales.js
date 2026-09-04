@@ -596,6 +596,8 @@ export async function renderSalesLeadDetail(el, id) {
 
     <div id="lead-gantt" style="margin-bottom:16px"></div>
 
+    ${ffbQuoteCardHtml(quote)}
+
     <div class="sales-detail">
       <div>
         ${customerCardHtml(lead)}
@@ -627,8 +629,6 @@ export async function renderSalesLeadDetail(el, id) {
             ${stepRow('Offert skickad till kund', lead.date_sent_customer)}
           </div>
         </div>
-
-        ${ffbQuoteCardHtml(quote)}
 
         ${leadFilesCardHtml(base, lead.files)}
       </div>
@@ -1376,10 +1376,10 @@ export async function renderSalesOrderDetail(el, id) {
     </div>
     </div>
 
+    <div id="order-gantt" style="margin-bottom:16px"></div>
+
     ${ffbOrderCardHtml(ffb, (order.files || []).filter(
       f => f.group_label === 'FFB-beställning' || f.group_label === 'FFB-offertförfrågan'))}
-
-    <div id="order-gantt" style="margin-bottom:16px"></div>
 
     <div class="milestone-grid">
       ${sections.map(sec => sec.aoc

@@ -86,6 +86,11 @@ class Customer(Base):
     address = Column(String)
     city = Column(String)
     postal_code = Column(String)
+    # Behövs på FFB-beställningen till Feldbinder, som är på engelska och
+    # kräver kundens VAT-nummer, land och kundnummer hos FFB
+    vat_number = Column(String)
+    country = Column(String)
+    ffb_customer_number = Column(String)
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -638,6 +643,9 @@ class SalesOrder(Base):
         "SalesActivity", back_populates="order", cascade="all, delete-orphan",
         order_by="SalesActivity.sort_order",
     )
+    ffb_order = relationship(
+        "FfbOrder", back_populates="order", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class SalesOrderAoc(Base):
@@ -717,3 +725,68 @@ class SalesOrderMilestone(Base):
 
     order = relationship("SalesOrder", back_populates="milestones")
     definition = relationship("SalesMilestoneDef")
+
+
+class FfbOrder(Base):
+    """Beställningen som skickas vidare till Feldbinder när affären är såld.
+
+    Motsvarar Word-mallen "FFB Order" som kunden fyllde i för hand. Raden skapas
+    förifylld ur ordern, förfrågan och kunden första gången beställningen
+    öppnas, och får sedan redigeras fritt – texten som går till FFB är kundens.
+
+    Alla värden är text: mallens rutor innehåller "1 pc", "ASAP" och "Aug 2026"
+    lika gärna som ett datum eller ett antal. Kundblocket kopieras med flit i
+    stället för att slås upp vid utskrift – beställningen som skickades ska inte
+    ändras för att kunden byter adress ett halvår senare.
+    """
+    __tablename__ = "ffb_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(
+        Integer, ForeignKey("sales_orders.id"), nullable=False, unique=True, index=True
+    )
+
+    # Huvud
+    doc_date = Column(Date)
+
+    # Kundblock
+    vat_number = Column(String)
+    customer_number = Column(String)
+    customer_name = Column(String)
+    address = Column(String)
+    postal_city = Column(String)
+    country = Column(String)
+    phone = Column(String)
+    email = Column(String)
+    contact_person = Column(String)
+
+    # Order info
+    quantity = Column(String)
+    quotation_number = Column(String)
+    delivery_time = Column(String)
+    product_type = Column(String)
+    part_no = Column(String)
+    part_delivery_time = Column(String)
+    volume_approx = Column(String)
+    transport_of = Column(String)
+    country_of_registration = Column(String)
+    drawing_number = Column(String)
+    special_feature = Column(String)
+
+    # Chassis info
+    chassis_make = Column(String)
+    wheel_base = Column(String)
+    fo_number = Column(String)
+    chassis_delivery_time = Column(String)
+
+    # Villkor
+    terms_payment = Column(String)
+    terms_delivery = Column(String)
+
+    order_text = Column(Text)
+
+    updated_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    order = relationship("SalesOrder", back_populates="ffb_order")

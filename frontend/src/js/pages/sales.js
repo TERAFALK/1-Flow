@@ -1038,7 +1038,7 @@ function openConvertForm(lead, onSaved) {
     for (const [k, v] of fd.entries()) body[k] = v === '' ? null : v;
     try {
       const order = await api.post(`/sales/leads/${lead.id}/convert`, body);
-      showToast('Order skapad', 'success');
+      showToast('Order skapad – FFB-beställningen är förifylld och redo att granskas', 'success');
       closeModal();
       location.hash = `#/sales-orders/${order.id}`;
       onSaved?.();
@@ -1277,7 +1277,12 @@ const AOC_SECTION_ORDER = 160;
 
 export async function renderSalesOrderDetail(el, id) {
   el.innerHTML = '<div class="loading">Laddar…</div>';
-  const order = await api.get(`/sales/orders/${id}`);
+  // Beställningen skapas förifylld av API:et första gången den hämtas. Att den
+  // inte går att hämta ska inte hindra ordervyn från att ritas.
+  const [order, ffb] = await Promise.all([
+    api.get(`/sales/orders/${id}`),
+    api.get(`/sales/orders/${id}/ffb-order`).catch(() => null),
+  ]);
 
   const titleEl = document.getElementById('topbar-title');
   if (titleEl) titleEl.textContent = order.order_number || order.customer_name;
@@ -1355,6 +1360,8 @@ export async function renderSalesOrderDetail(el, id) {
     </div>
     </div>
 
+    ${ffbOrderCardHtml(ffb, (order.files || []).filter(f => f.group_label === 'FFB-beställning'))}
+
     <div id="order-gantt" style="margin-bottom:16px"></div>
 
     <div class="milestone-grid">
@@ -1374,6 +1381,13 @@ export async function renderSalesOrderDetail(el, id) {
 
   document.getElementById('edit-order-btn').addEventListener('click', () => openOrderForm(order, reload));
   bindPrintButtons('order-pdf', `${base}/pdf`, `order-${id}.pdf`);
+
+  document.getElementById('ffb-edit-btn')?.addEventListener('click', () => openFfbOrderForm(id, ffb, reload));
+  document.getElementById('ffb-download-btn')?.addEventListener('click', async () => {
+    const name = `FFB-order-${order.order_number || id}.pdf`;
+    try { await downloadFile(`${base}/ffb-order/pdf`, name); }
+    catch (err) { showToast(err.message, 'error'); }
+  });
   bindNotes(base, reload, { notes: order.order_notes });
 
   document.getElementById('archive-btn')?.addEventListener('click', async () => {
@@ -1689,6 +1703,128 @@ async function openOrderForm(order, onSaved) {
     try {
       await api.put(`/sales/orders/${order.id}`, body);
       showToast('Order uppdaterad', 'success');
+      closeModal();
+      onSaved?.();
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+}
+
+// ── Beställning till Feldbinder ─────────────────────────────────
+
+/** Kortet som ersätter Word-mallen. API:et förifyller beställningen ur ordern,
+ *  förfrågan och kunden – tills någon sparat den räknas den som ogranskad. */
+function ffbOrderCardHtml(ffb, files) {
+  if (!ffb) return '';
+  const reviewed = !!ffb.updated_by;
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <span class="card-title">FFB-beställning</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:${reviewed ? 'var(--text-2)' : 'var(--accent)'}">
+            ${reviewed ? 'Granskad' : 'Förifylld – ej granskad'}
+          </span>
+          <button class="btn btn-secondary btn-sm" id="ffb-edit-btn">Redigera</button>
+          <button class="btn btn-primary btn-sm" id="ffb-download-btn">Ladda ner PDF</button>
+        </div>
+      </div>
+      <div class="card-body order-meta">
+        ${metaRow('Quotation nr', ffb.quotation_number)}
+        ${metaRow('Typ', ffb.product_type)}
+        ${metaRow('Volume approx.', ffb.volume_approx)}
+        ${metaRow('Delivery time', ffb.delivery_time)}
+        ${metaRow('Contact pers', ffb.contact_person)}
+        ${metaRow('Chassi', ffb.chassis_make)}
+        ${metaRow('According to drawing', ffb.drawing_number)}
+        ${sectionFilesHtml(files)}
+      </div>
+    </div>`;
+}
+
+/** Fälten följer Word-mallens indelning så att den som fyllt i den förut
+ *  känner igen sig. Allt är fritext – mallens rutor rymmer både "1 pc" och
+ *  "ASAP" lika gärna som ett antal eller ett datum. */
+function openFfbOrderForm(orderId, ffb, onSaved) {
+  const f = (name, label, opts = {}) => `
+    <div class="field">
+      <label>${esc(label)}</label>
+      <input type="${opts.type || 'text'}" name="${name}" value="${esc(ffb[name])}">
+    </div>`;
+
+  openModal({
+    title: 'FFB-beställning',
+    size: 'modal-lg',
+    body: `
+      <form id="ffb-form">
+        <div class="form-row">
+          ${f('doc_date', 'Date', { type: 'date' })}
+          ${f('vat_number', 'VAT nr')}
+          ${f('customer_number', 'Customer nr')}
+        </div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('customer_name', 'Customer')}
+          ${f('address', 'Adress')}
+          ${f('postal_city', 'Postnummer/Stad')}
+        </div>
+        <div class="form-row">
+          ${f('country', 'Country')}
+          ${f('phone', 'Phone')}
+          ${f('email', 'Mail')}
+          ${f('contact_person', 'Contact pers')}
+        </div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('quantity', 'Quantity')}
+          ${f('quotation_number', 'Quotation nr')}
+          ${f('delivery_time', 'Delivery time')}
+          ${f('product_type', 'Typ')}
+        </div>
+        <div class="form-row">
+          ${f('volume_approx', 'Volume approx.')}
+          ${f('transport_of', 'Transport of')}
+          ${f('country_of_registration', 'Country of registration')}
+          ${f('drawing_number', 'According to drawing')}
+        </div>
+        <div class="form-row">
+          ${f('part_no', 'Part No')}
+          ${f('part_delivery_time', 'Delivery time (part)')}
+        </div>
+        <div class="field"><label>Special feature</label><input type="text" name="special_feature" value="${esc(ffb.special_feature)}"></div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('chassis_make', 'Chassi')}
+          ${f('wheel_base', 'Wheel base')}
+          ${f('fo_number', 'FO Number')}
+          ${f('chassis_delivery_time', 'Delivery time (chassi)')}
+        </div>
+
+        <hr class="divider">
+        <div class="form-row">
+          ${f('terms_payment', 'Terms of Payment')}
+          ${f('terms_delivery', 'Terms of Delivery')}
+        </div>
+
+        <div class="field"><label>Order text</label><textarea name="order_text" rows="6">${esc(ffb.order_text)}</textarea></div>
+
+        <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
+          <button type="submit" class="btn btn-primary">Spara</button>
+        </div>
+      </form>`,
+  });
+
+  document.getElementById('ffb-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {};
+    for (const [k, v] of fd.entries()) body[k] = v === '' ? null : v;
+    try {
+      await api.put(`/sales/orders/${orderId}/ffb-order`, body);
+      showToast('FFB-beställningen sparad – PDF:en ligger som bilaga på ordern', 'success');
       closeModal();
       onSaved?.();
     } catch (err) { showToast(err.message, 'error'); }

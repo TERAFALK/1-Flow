@@ -143,6 +143,9 @@ export async function renderCustomerDetail(el, id) {
             ${metaRow('Adress', c.address)}
             ${metaRow('Postnummer', c.postal_code)}
             ${metaRow('Ort', c.city)}
+            ${metaRow('Land', c.country)}
+            ${metaRow('VAT-nummer', c.vat_number)}
+            ${metaRow('Kundnr hos FFB', c.ffb_customer_number)}
             ${c.notes ? `<hr class="divider"><p style="font-size:13px;color:var(--text-2)">${c.notes}</p>` : ''}
           </div>
         </div>
@@ -387,6 +390,12 @@ export function openCustomerForm(customer, onSaved) {
         <div class="form-row">
           <div class="field"><label>Postnummer</label><input type="text" name="postal_code" value="${customer?.postal_code || ''}"></div>
           <div class="field"><label>Ort</label><input type="text" name="city" value="${customer?.city || ''}"></div>
+          <div class="field"><label>Land</label><input type="text" name="country" value="${customer?.country || ''}"></div>
+        </div>
+        <!-- Behövs på beställningen till Feldbinder, som är på engelska -->
+        <div class="form-row">
+          <div class="field"><label>VAT-nummer</label><input type="text" name="vat_number" value="${customer?.vat_number || ''}"></div>
+          <div class="field"><label>Kundnr hos FFB</label><input type="text" name="ffb_customer_number" value="${customer?.ffb_customer_number || ''}"></div>
         </div>
         <div class="field"><label>Anteckningar</label><textarea name="notes">${customer?.notes || ''}</textarea></div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">

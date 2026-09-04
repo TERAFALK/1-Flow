@@ -10,7 +10,7 @@ from .routers import (
     auth, users, customers, vehicles, articles,
     work_orders, time_entries, dashboard,
     settings, contacts, phases, purchases, files, activities, tasks,
-    pick_lists, sales_leads, sales_orders, sales_milestones, notes,
+    pick_lists, sales_leads, sales_orders, sales_milestones, ffb_orders, notes,
 )
 
 models.Base.metadata.create_all(bind=engine)
@@ -353,6 +353,50 @@ def _run_migrations():
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lead_id INTEGER REFERENCES sales_leads(id) ON DELETE CASCADE",
         "ALTER TABLE tasks ALTER COLUMN work_order_id DROP NOT NULL",
         "CREATE INDEX IF NOT EXISTS ix_tasks_lead_id ON tasks (lead_id)",
+        # ── Beställning till Feldbinder ───────────────────────────────────────
+        # FFB-beställningen är på engelska och vill ha uppgifter vi inte har
+        # frågat efter tidigare. De hör till kunden, inte till en enskild order.
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS vat_number VARCHAR",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS country VARCHAR",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS ffb_customer_number VARCHAR",
+        # Själva beställningen. En rad per order, skapad förifylld första gången
+        # den öppnas – därför inga värden att migrera för redan sålda ordrar.
+        """CREATE TABLE IF NOT EXISTS ffb_orders (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL UNIQUE REFERENCES sales_orders(id) ON DELETE CASCADE,
+            doc_date DATE,
+            vat_number VARCHAR,
+            customer_number VARCHAR,
+            customer_name VARCHAR,
+            address VARCHAR,
+            postal_city VARCHAR,
+            country VARCHAR,
+            phone VARCHAR,
+            email VARCHAR,
+            contact_person VARCHAR,
+            quantity VARCHAR,
+            quotation_number VARCHAR,
+            delivery_time VARCHAR,
+            product_type VARCHAR,
+            part_no VARCHAR,
+            part_delivery_time VARCHAR,
+            volume_approx VARCHAR,
+            transport_of VARCHAR,
+            country_of_registration VARCHAR,
+            drawing_number VARCHAR,
+            special_feature VARCHAR,
+            chassis_make VARCHAR,
+            wheel_base VARCHAR,
+            fo_number VARCHAR,
+            chassis_delivery_time VARCHAR,
+            terms_payment VARCHAR,
+            terms_delivery VARCHAR,
+            order_text TEXT,
+            updated_by INTEGER REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_ffb_orders_order_id ON ffb_orders (order_id)",
     ]
     with engine.connect() as conn:
         for stmt in stmts:
@@ -481,6 +525,7 @@ app.include_router(pick_lists.router)
 app.include_router(sales_leads.router)
 app.include_router(sales_orders.router)
 app.include_router(sales_milestones.router)
+app.include_router(ffb_orders.router)
 
 
 @app.on_event("startup")

@@ -43,10 +43,18 @@ class _Doc:
         self.subtitle = subtitle
         self.y = draw_header(self.c, PAGE_W, title, subtitle) - 6 * mm
 
-    def new_page(self) -> float:
-        self.c.showPage()
+    def page_header(self) -> float:
+        """Ritar sidhuvudet på en redan påbörjad sida, utan att bryta sidan.
+
+        Används som ``on_new_page`` till :func:`draw_paragraph`, som själv gör
+        sidbrytningen – annars hade sidan brutits två gånger och en tom sida
+        hamnat i PDF:en."""
         self.y = draw_header(self.c, PAGE_W, self.title, self.subtitle) - 6 * mm
         return self.y
+
+    def new_page(self) -> float:
+        self.c.showPage()
+        return self.page_header()
 
     def space(self, needed: float):
         """Bryter sidan om det som ska ritas inte får plats."""
@@ -121,7 +129,7 @@ class _Doc:
         self.space(10 * mm)
         self.y = draw_paragraph(
             self.c, body, MARGIN, self.y, CONTENT_W,
-            min_y=MIN_Y, on_new_page=self.new_page,
+            min_y=MIN_Y, on_new_page=self.page_header,
         ) - 2 * mm
 
     def finish(self) -> io.BytesIO:

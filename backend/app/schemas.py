@@ -71,6 +71,9 @@ class CustomerCreate(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     postal_code: Optional[str] = None
+    vat_number: Optional[str] = None
+    country: Optional[str] = None
+    ffb_customer_number: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -88,6 +91,9 @@ class CustomerOut(BaseModel):
     address: Optional[str]
     city: Optional[str]
     postal_code: Optional[str]
+    vat_number: Optional[str] = None
+    country: Optional[str] = None
+    ffb_customer_number: Optional[str] = None
     notes: Optional[str]
     created_at: datetime
 
@@ -1114,6 +1120,54 @@ class SalesLeadToWorkOrder(BaseModel):
     vehicle_id: Optional[int] = None
     assigned_to: Optional[int] = None
     scheduled_date: Optional[datetime] = None
+
+
+# ── FFB-beställning ───────────────────────────────────────────────────────────
+
+class FfbOrderUpdate(BaseModel):
+    """Allt på beställningen får redigeras – fälten speglar Word-mallens rutor."""
+    doc_date: Optional[date] = None
+
+    vat_number: Optional[str] = None
+    customer_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    address: Optional[str] = None
+    postal_city: Optional[str] = None
+    country: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    contact_person: Optional[str] = None
+
+    quantity: Optional[str] = None
+    quotation_number: Optional[str] = None
+    delivery_time: Optional[str] = None
+    product_type: Optional[str] = None
+    part_no: Optional[str] = None
+    part_delivery_time: Optional[str] = None
+    volume_approx: Optional[str] = None
+    transport_of: Optional[str] = None
+    country_of_registration: Optional[str] = None
+    drawing_number: Optional[str] = None
+    special_feature: Optional[str] = None
+
+    chassis_make: Optional[str] = None
+    wheel_base: Optional[str] = None
+    fo_number: Optional[str] = None
+    chassis_delivery_time: Optional[str] = None
+
+    terms_payment: Optional[str] = None
+    terms_delivery: Optional[str] = None
+
+    order_text: Optional[str] = None
+
+
+class FfbOrderOut(FfbOrderUpdate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    order_id: int
+    # Tomt så länge ingen har sparat beställningen – vyn visar den som ogranskad
+    updated_by: Optional[int] = None
+    updated_at: Optional[datetime] = None
 
 
 Token.model_rebuild()

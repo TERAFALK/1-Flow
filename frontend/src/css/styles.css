@@ -552,6 +552,41 @@ tbody tr.clickable { cursor: pointer; }
 .modal-guard-text { font-size: 13px; color: var(--text-2); margin-bottom: 18px; }
 .modal-guard-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
+/* ── Formaterad brödtext ─────────────────────────────────────────────────────
+   Fälten som blir underlag i en PDF. white-space: pre-wrap gör att tabbar och
+   dubbla mellanslag syns på skärmen som de sedan gör i dokumentet. */
+.richtext {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.richtext:focus-within { border-color: var(--accent); }
+.richtext-toolbar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--surface-2);
+}
+.richtext-btn {
+  min-width: 26px; height: 24px;
+  border: none; background: none; cursor: pointer;
+  color: var(--text-2); border-radius: 4px;
+  font-size: 13px; line-height: 1;
+}
+.richtext-btn:hover { background: var(--bg); color: var(--text); }
+.richtext-hint { margin-left: auto; font-size: 11px; color: var(--text-3); }
+.richtext-input {
+  padding: 10px 12px;
+  font: inherit; font-size: 13px; line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  tab-size: 8;
+  overflow-y: auto; max-height: 40vh;
+  outline: none;
+}
+.richtext-input ul { margin: 0 0 0 18px; }
+
 /* ── Toast ───────────────────────────────────────────────────────────────────── */
 #toast-container {
   position: fixed; bottom: 20px; right: 20px;

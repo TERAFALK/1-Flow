@@ -5,6 +5,7 @@ import { openCustomerForm } from './customers.js';
 import { renderGantt } from '../components/gantt.js';
 import { makeAllSearchable } from '../components/combobox.js';
 import { notesCardHtml, bindNotes } from '../components/notes.js';
+import { richTextField, bindRichText } from '../components/richtext.js';
 import { tasksCardHtml, bindTasks } from '../components/tasks.js';
 
 // ── Gemensamma hjälpare ───────────────────────────────────────────────────────
@@ -652,6 +653,12 @@ export async function renderSalesLeadDetail(el, id) {
   document.getElementById('ffbq-download-btn')?.addEventListener('click', async () => {
     const name = `FFB-offertforfragan-${lead.quote_number || id}.pdf`;
     try { await downloadFile(`${base}/ffb-quote/pdf`, name); }
+    catch (err) { showToast(err.message, 'error'); }
+  });
+  // Samma uppgifter på svenska, utan FFB:s logotyp – går vidare till kunden
+  document.getElementById('ffbq-sv-btn')?.addEventListener('click', async () => {
+    const name = `Offertforfragan-${lead.quote_number || id}.pdf`;
+    try { await downloadFile(`${base}/ffb-quote/pdf?lang=sv`, name); }
     catch (err) { showToast(err.message, 'error'); }
   });
 
@@ -1742,6 +1749,8 @@ function ffbQuoteCardHtml(quote) {
             ${reviewed ? 'Granskad' : 'Förifylld – ej granskad'}
           </span>
           <button class="btn btn-secondary btn-sm" id="ffbq-edit-btn">Redigera</button>
+          <button class="btn btn-secondary btn-sm" id="ffbq-sv-btn"
+                  title="Samma uppgifter på svenska, som underlag till kunden">Svensk kopia</button>
           <button class="btn btn-primary btn-sm" id="ffbq-download-btn">Ladda ner PDF</button>
         </div>
       </div>
@@ -1816,7 +1825,7 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
 
         <div class="field">
           <label>Quotation request text</label>
-          <textarea name="request_text" rows="6">${esc(quote.request_text)}</textarea>
+          ${richTextField('request_text', quote.request_text)}
         </div>
 
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
@@ -1825,6 +1834,8 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
         </div>
       </form>`,
   });
+
+  bindRichText(document.getElementById('ffbq-form'));
 
   document.getElementById('ffbq-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1939,7 +1950,10 @@ function openFfbOrderForm(orderId, customerId, ffb, onSaved) {
           ${f('terms_delivery', 'Terms of Delivery')}
         </div>
 
-        <div class="field"><label>Order text</label><textarea name="order_text" rows="6">${esc(ffb.order_text)}</textarea></div>
+        <div class="field">
+          <label>Order text</label>
+          ${richTextField('order_text', ffb.order_text)}
+        </div>
 
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
@@ -1947,6 +1961,8 @@ function openFfbOrderForm(orderId, customerId, ffb, onSaved) {
         </div>
       </form>`,
   });
+
+  bindRichText(document.getElementById('ffb-form'));
 
   document.getElementById('ffb-form').addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -7,7 +7,7 @@ den senast sparade versionen ligger som bilaga på förfrågan.
 """
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -83,8 +83,8 @@ def _get_or_create(db: Session, lead: SalesLead) -> FfbQuote:
     return quote
 
 
-def pdf_name(lead: SalesLead) -> str:
-    return safe_filename(f"FFB-offertforfragan-{lead.quote_number or lead.id}") + ".pdf"
+def pdf_name(lead: SalesLead, prefix: str = "FFB-offertforfragan") -> str:
+    return safe_filename(f"{prefix}-{lead.quote_number or lead.id}") + ".pdf"
 
 
 def store_quote_pdf(db: Session, lead: SalesLead, quote: FfbQuote, user_id) -> SalesLeadFile:
@@ -155,13 +155,22 @@ def update_ffb_quote(
 @router.get("/pdf")
 def ffb_quote_pdf(
     lead_id: int,
+    lang: str = Query("en", pattern="^(en|sv)$",
+                      description="en = dokumentet till FFB, sv = underlag till slutkunden"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    """Offertförfrågan som PDF.
+
+    Engelska är dokumentet som går till FFB. Svenska är samma uppgifter som
+    underlag till slutkunden, med Flows sidhuvud i stället för FFB:s logotyp.
+    Bara etiketterna byts – fritexten står kvar precis som den skrevs.
+    """
     lead = _get_lead(db, lead_id)
     quote = _get_or_create(db, lead)
+    name = pdf_name(lead) if lang == "en" else pdf_name(lead, prefix="Offertforfragan-sv")
     return StreamingResponse(
-        build_ffb_quote_pdf(quote, customer_block(lead)),
+        build_ffb_quote_pdf(quote, customer_block(lead), lang=lang),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{pdf_name(lead)}"'},
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )

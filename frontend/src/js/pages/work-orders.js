@@ -1,6 +1,7 @@
 import { api, downloadFile, printFile } from '../api.js';
 import { statusBadge, fmtDate, fmtDuration } from '../app.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
+import { richTextField, bindRichText } from '../components/richtext.js';
 import { showToast } from '../components/toast.js';
 import { renderGantt } from '../components/gantt.js';
 import { makeSearchable } from '../components/combobox.js';
@@ -376,7 +377,7 @@ async function loadDetail(el, id) {
           <span class="text-muted" style="font-size:12px" id="body-save-status"></span>
         </div>
         <div class="card-body" style="padding-top:0">
-          <textarea id="body-text-area" rows="10" placeholder="Beskriv arbetet i detalj, noteringar, teknisk information…" style="width:100%;resize:vertical">${wo.body_text || ''}</textarea>
+          ${richTextField('body_text', wo.body_text, { rows: 10 })}
         </div>
       </div>
     </div>
@@ -517,8 +518,8 @@ async function loadDetail(el, id) {
 
   // Arbetstexten sparas med fördröjning – spola pågående ändring först
   const flushBodyText = async () => {
-    const area = document.getElementById('body-text-area');
-    if (area) await api.put(`/work-orders/${id}`, { body_text: area.value });
+    const field = document.querySelector('[data-rich-for="body_text"] input[type="hidden"]');
+    if (field) await api.put(`/work-orders/${id}`, { body_text: field.value });
   };
 
   bindPdf('print-bodytext-btn', 'print', `/work-orders/${id}/bodytext/pdf`, null, flushBodyText);
@@ -574,17 +575,22 @@ function timeEntryRow(e, orderId) {
 // ── Body text tab init ────────────────────────────────────────────────────────
 
 function initBodyText(orderId) {
-  const bodyArea = document.getElementById('body-text-area');
+  const wrap = document.querySelector('[data-rich-for="body_text"]');
   const saveStatus = document.getElementById('body-save-status');
-  if (!bodyArea || bodyArea.dataset.initDone) return;
-  bodyArea.dataset.initDone = '1';
+  if (!wrap || wrap.dataset.initDone) return;
+  wrap.dataset.initDone = '1';
+  bindRichText(wrap.parentNode);
+  const field = wrap.querySelector('input[type="hidden"]');
+
   let bodyTimer;
-  bodyArea.addEventListener('input', () => {
+  // Lyssnar på omslaget: redigerarens egen input-hanterare har då redan
+  // uppdaterat det dolda fältet, som är det vi sparar
+  wrap.addEventListener('input', () => {
     saveStatus.textContent = 'Osparad…';
     clearTimeout(bodyTimer);
     bodyTimer = setTimeout(async () => {
       try {
-        await api.put(`/work-orders/${orderId}`, { body_text: bodyArea.value });
+        await api.put(`/work-orders/${orderId}`, { body_text: field.value });
         saveStatus.textContent = 'Sparad';
         setTimeout(() => { saveStatus.textContent = ''; }, 2000);
       } catch { saveStatus.textContent = 'Fel vid sparning'; }

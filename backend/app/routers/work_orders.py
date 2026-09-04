@@ -13,7 +13,8 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 from ..database import get_db
 from ..deps import get_current_user
-from ..pdf_utils import draw_header, draw_paragraph, wrap_lines, truncate
+from ..pdf_utils import draw_header, wrap_lines, truncate
+from ..richtext import draw_rich_text
 from ..schemas import (
     WorkOrderCreate, WorkOrderUpdate, WorkOrderOut, WorkOrderListItem,
     WorkOrderLineCreate, WorkOrderLineUpdate, WorkOrderLineOut, WorkOrderLineBulkCreate,
@@ -648,10 +649,16 @@ def body_text_pdf(
 
     text = (wo.body_text or "").strip()
     if text:
-        y = draw_paragraph(
+        def next_page():
+            # draw_rich_text bryter inte sidan själv, till skillnad från
+            # draw_paragraph – den som ritar äger brytningen
+            c.showPage()
+            return draw_header(c, page_w, "Arbetstext", subtitle) - 6
+
+        y = draw_rich_text(
             c, text, margin, y, page_w - 2 * margin,
             font_size=10, leading=14, min_y=22 * mm,
-            on_new_page=lambda: draw_header(c, page_w, "Arbetstext", subtitle) - 6,
+            on_new_page=next_page,
         )
     else:
         c.setFont("Helvetica-Oblique", 10)

@@ -5,10 +5,15 @@
 // stor del desamma och det som ändras är enstaka rader plus veckoschemat.
 
 import { api, printFile, downloadFile } from '../api.js';
-import { openModal, closeModal, confirmDialog } from '../components/modal.js';
+import { openModal, closeModal, confirmDialog, confirmUnsaved } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { makeAllSearchable } from '../components/combobox.js';
 import { richTextField, bindRichText } from '../components/richtext.js';
+
+// Osparade ändringar på veckosidan. Sidan är inget modalfönster, så vakten i
+// modal.js når den inte – den installeras här och kopplas loss när sidan ritas
+// om eller lämnas.
+let detachGuard = null;
 
 const WEEKDAYS = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
 const ABSENCE_KINDS = ['semester', 'ledig', 'sjuk', 'annat'];
@@ -33,9 +38,53 @@ function weekSpan(monday) {
   return `${f(start)} – ${f(end)}`;
 }
 
+/**
+ * Varnar innan veckan lämnas med osparade ändringar.
+ *
+ * Navigeringen sker med länkar till hash-adresser, och `hashchange` kommer
+ * först efter att adressen redan bytts – för sent för att fråga. Klicket fångas
+ * därför i infångningsfasen, innan webbläsaren hinner följa länken.
+ */
+function installGuard(isDirty, save) {
+  detachGuard?.();
+
+  const onClick = async (e) => {
+    const link = e.target.closest('a[href^="#"]');
+    if (!link || !isDirty()) return;
+    const target = link.getAttribute('href');
+    if (target === location.hash) return;   // samma sida, ingen navigering
+
+    e.preventDefault();
+    e.stopPropagation();
+    const answer = await confirmUnsaved('Veckan har ändringar som inte är sparade.');
+    if (answer === 'cancel') return;
+    if (answer === 'save') {
+      try { await save(); } catch (err) { showToast(err.message, 'error'); return; }
+    }
+    detachGuard?.();
+    location.hash = target;
+  };
+
+  // Stängd flik eller omladdning – där kan bara webbläsarens egen fråga användas
+  const onUnload = (e) => {
+    if (!isDirty()) return;
+    e.preventDefault();
+    e.returnValue = '';
+  };
+
+  document.addEventListener('click', onClick, true);
+  window.addEventListener('beforeunload', onUnload);
+  detachGuard = () => {
+    document.removeEventListener('click', onClick, true);
+    window.removeEventListener('beforeunload', onUnload);
+    detachGuard = null;
+  };
+}
+
 // ── Arkivet ───────────────────────────────────────────────────────────────────
 
 export async function renderPlanning(el) {
+  detachGuard?.();
   el.innerHTML = '<div class="loading">Laddar…</div>';
   const archive = await api.get('/planning-meetings');
 
@@ -168,6 +217,8 @@ function openNewWeekForm(archive, onSaved) {
 // ── Veckan ────────────────────────────────────────────────────────────────────
 
 export async function renderPlanningWeek(el, isoYear, isoWeek) {
+  // Vakten från förra renderingen pekar på gamla fält och måste bort först
+  detachGuard?.();
   el.innerHTML = '<div class="loading">Laddar…</div>';
 
   let meeting;
@@ -272,10 +323,24 @@ export async function renderPlanningWeek(el, isoYear, isoWeek) {
     };
   };
 
-  const save = async () => {
+  let dirty = false;
+  const form = document.getElementById('pm-form');
+  // Allt som når hit är användarens egen inmatning – programmatisk ifyllnad
+  // sker innan lyssnaren sätts upp
+  form.addEventListener('input', () => { dirty = true; });
+  form.addEventListener('change', () => { dirty = true; });
+
+  const save = async (quiet = false) => {
     await api.put(base, collect());
-    showToast('Veckan sparad', 'success');
+    dirty = false;
+    if (!quiet) showToast('Veckan sparad', 'success');
   };
+
+  /** Sparar sidan innan något som ritar om den. Utan det försvinner texten han
+   *  skrivit i schemat och fritextfälten så fort en rad läggs till eller hämtas. */
+  const keep = async () => { if (dirty) await save(true); };
+
+  installGuard(() => dirty, save);
 
   document.getElementById('pm-save')?.addEventListener('click', async () => {
     try { await save(); } catch (err) { showToast(err.message, 'error'); }
@@ -294,11 +359,16 @@ export async function renderPlanningWeek(el, isoYear, isoWeek) {
   });
 
   // ── Rader ───────────────────────────────────────────────────────────────────
-  document.getElementById('pm-add')?.addEventListener('click',
-    () => openItemForm(base, null, { users, customers }, reload));
+  // Varje radoperation ritar om sidan efteråt. Sidan sparas därför först, annars
+  // hade det han skrivit i schemat och fritextfälten kastats bort.
+  document.getElementById('pm-add')?.addEventListener('click', async () => {
+    try { await keep(); } catch (err) { showToast(err.message, 'error'); return; }
+    openItemForm(base, null, { users, customers }, reload);
+  });
 
   el.querySelectorAll('[data-edit-item]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
+      try { await keep(); } catch (err) { showToast(err.message, 'error'); return; }
       const item = meeting.items.find(i => i.id === +btn.dataset.editItem);
       openItemForm(base, item, { users, customers }, reload);
     });
@@ -308,6 +378,7 @@ export async function renderPlanningWeek(el, isoYear, isoWeek) {
     btn.addEventListener('click', async () => {
       if (!await confirmDialog('Ta bort raden?')) return;
       try {
+        await keep();
         await api.delete(`${base}/items/${btn.dataset.delItem}`);
         showToast('Rad borttagen', 'success');
         reload();
@@ -325,8 +396,10 @@ export async function renderPlanningWeek(el, isoYear, isoWeek) {
     });
   });
 
-  document.getElementById('pm-suggest')?.addEventListener('click',
-    () => openSuggestions(base, reload));
+  document.getElementById('pm-suggest')?.addEventListener('click', async () => {
+    try { await keep(); } catch (err) { showToast(err.message, 'error'); return; }
+    openSuggestions(base, reload);
+  });
 
   // ── Frånvaro till Noteringar ────────────────────────────────────────────────
   document.getElementById('pm-absence-insert')?.addEventListener('click', () => {

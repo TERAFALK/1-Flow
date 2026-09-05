@@ -108,6 +108,39 @@ export function modalBody() {
   return box().querySelector('.modal-body');
 }
 
+/**
+ * Samma fråga som vakten i en modal, men för en hel sida som håller på att
+ * lämnas med osparade ändringar. Svarar 'save', 'discard' eller 'cancel'.
+ *
+ * Sidor är inte modaler, så requestClose når dem inte – men frågan ska se
+ * likadan ut och ha samma tre val, annars beter sig systemet olika beroende på
+ * var man råkar stå.
+ */
+export function confirmUnsaved(message = 'Du har ändringar som inte är sparade.') {
+  return new Promise((resolve) => {
+    let answer = 'cancel';
+    openModal({
+      title: 'Spara ändringarna?',
+      body: `
+        <p style="margin-bottom:20px;color:var(--text-2);font-size:13px">${message}</p>
+        <div class="modal-footer" style="padding:0;border:none">
+          <button class="btn btn-secondary" data-unsaved="cancel">Fortsätt redigera</button>
+          <button class="btn btn-secondary" data-unsaved="discard">Kasta ändringar</button>
+          <button class="btn btn-primary" data-unsaved="save">Spara</button>
+        </div>`,
+      // Klick utanför eller Escape räknas som "fortsätt redigera" – det är det
+      // ofarliga valet när frågan just handlar om att inte tappa något
+      onClose: () => resolve(answer),
+    });
+    box().querySelectorAll('[data-unsaved]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        answer = btn.dataset.unsaved;
+        closeModal();
+      });
+    });
+  });
+}
+
 export function confirmDialog(message, confirmLabel = 'Ta bort') {
   return new Promise((resolve) => {
     openModal({

@@ -82,7 +82,9 @@ def _prefill(order: SalesOrder) -> FfbOrder:
         product_type=order.product_type or (lead.product_type if lead else None),
         volume_approx=lead.size if lead else None,
         country_of_registration=customer.country if customer else None,
-        special_feature=order.notes or (lead.description if lead else None),
+        # Förfrågans Beskrivning följer med flit inte med – den är en intern
+        # sammanfattning av affären, inte en specifikation åt FFB
+        special_feature=order.notes,
         terms_payment=DEFAULT_TERMS_PAYMENT,
         terms_delivery=DEFAULT_TERMS_DELIVERY,
     )

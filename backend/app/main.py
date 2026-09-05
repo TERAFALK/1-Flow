@@ -430,6 +430,22 @@ def _run_migrations():
         # Svensk version av offertförfrågans fritext, för den svenska utskriften
         "ALTER TABLE ffb_quotes ADD COLUMN IF NOT EXISTS request_text_sv TEXT",
         "ALTER TABLE ffb_quotes ADD COLUMN IF NOT EXISTS special_feature_sv VARCHAR",
+        # Förfrågans Beskrivning kopierades tidigare in i FFB-dokumentens
+        # "Special feature". Den är intern och ska inte till Feldbinder. Städa
+        # bort den ur poster som fortfarande bara innehåller vår förifyllning –
+        # updated_by är tomt så länge ingen sparat formuläret, så det som rensas
+        # här är aldrig något någon skrivit själv.
+        """UPDATE ffb_quotes q SET special_feature = NULL
+           FROM sales_leads l
+           WHERE q.lead_id = l.id
+             AND q.updated_by IS NULL
+             AND q.special_feature IS NOT DISTINCT FROM l.description""",
+        """UPDATE ffb_orders o SET special_feature = NULL
+           FROM sales_orders so
+           JOIN sales_leads l ON l.id = so.lead_id
+           WHERE o.order_id = so.id
+             AND o.updated_by IS NULL
+             AND o.special_feature IS NOT DISTINCT FROM l.description""",
     ]
     with engine.connect() as conn:
         for stmt in stmts:

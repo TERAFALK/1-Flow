@@ -22,9 +22,12 @@ from reportlab.platypus import Paragraph
 _INLINE = {"b": "b", "strong": "b", "i": "i", "em": "i", "u": "u"}
 _BLOCK = {"div", "p", "li", "ul", "ol", "br"}
 
-# Bara våra egna taggar räknas som markup. Ett värde med ett ensamt "<" i sig
-# ("5 < 6", "<ren> text") är vanlig text och ska escapas, inte tolkas.
-_HAS_MARKUP = re.compile(r"</?(?:b|strong|i|em|u|br|div|p|ul|ol|li)\b[^>]*>", re.I)
+# Bara taggar redigeraren kan skapa räknas som markup. Ett värde med ett ensamt
+# "<" i sig ("5 < 6", "<ren> text") är vanlig text och ska escapas, inte tolkas.
+# span finns med för att Chrome lindar infogade tabbar i
+# <span style="white-space:pre">; utan den läses en text vars enda tagg är den
+# spannen som ren text, och taggen skrivs ut synligt i dokumentet.
+_HAS_MARKUP = re.compile(r"</?(?:b|strong|i|em|u|br|div|p|ul|ol|li|span)\b[^>]*>", re.I)
 
 # En tabb blir fast bredd i PDF:en. Paragraph fäller ihop vanliga blanksteg,
 # så det måste vara hårda mellanslag för att kolumnerna ska hålla.
@@ -57,14 +60,22 @@ class _Parser(HTMLParser):
         self._in_list = 0
 
     # ── stycken ──────────────────────────────────────────────────────────────
-    def _flush(self):
+    def _flush(self, explicit: bool = False):
         """Avslutar stycket. Taggar som fortfarande är öppna stängs här och
         öppnas igen i nästa stycke, så att varje stycke för sig är balanserat –
-        ``Paragraph`` fallerar annars på en fetstil som korsar en radbrytning."""
+        ``Paragraph`` fallerar annars på en fetstil som korsar en radbrytning.
+
+        ``explicit`` skiljer en radbrytning användaren gjort (``<br>`` eller ett
+        ``\\n``) från en ren strukturgräns (``</div>`` följt av ``<div>``). Den
+        första ska ge en tom rad när det inte står något emellan, den andra ska
+        inte det – annars hamnar en blankrad mellan varje rad i texten.
+        """
         markup = "".join(self._parts + [f"</{t}>" for t in reversed(self._open)]).strip()
         # Ett stycke som bara består av taggar (t.ex. en fetstil som stängdes av
-        # en radbrytning) har inget att visa och blir annars en tom rad
-        if markup and plain_text(markup):
+        # en radbrytning) har inget att visa och räknas som en tom rad
+        if not plain_text(markup):
+            markup = ""
+        if markup or explicit:
             self.blocks.append(_Block(markup, self._bullet))
         self._parts = [f"<{t}>" for t in self._open]
 
@@ -74,7 +85,7 @@ class _Parser(HTMLParser):
             self._open.append(_INLINE[tag])
             self._parts.append(f"<{_INLINE[tag]}>")
         elif tag == "br":
-            self._flush()
+            self._flush(explicit=True)
         elif tag == "li":
             self._flush()
             self._bullet = True
@@ -105,8 +116,15 @@ class _Parser(HTMLParser):
             self._flush()
 
     def handle_data(self, data):
-        # Taggarna i _parts är våra egna, så bara den riktiga texten escapas
-        self._parts.append(html.escape(data, quote=False).replace("\t", TAB))
+        # Ett fält med white-space: pre-wrap kan få ett rent radbrytningstecken
+        # i stället för <br> när användaren trycker Enter. Varje rad blir därför
+        # ett eget stycke, annars klistras texten ihop till en enda röra.
+        lines = data.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        for i, line in enumerate(lines):
+            if i:
+                self._flush(explicit=True)
+            # Taggarna i _parts är våra egna, så bara den riktiga texten escapas
+            self._parts.append(html.escape(line, quote=False).replace("\t", TAB))
 
     def close(self):
         super().close()
@@ -132,7 +150,19 @@ def to_blocks(value: str) -> list:
     parser = _Parser()
     parser.feed(value)
     parser.close()
-    return parser.blocks
+
+    blocks = parser.blocks
+    # Tomma rader först och sist är rester ur redigerarens markup, inte något
+    # användaren skrivit. Tomma rader mitt i texten är däremot styckeindelning
+    # och ska vara kvar.
+    while blocks and not blocks[0].markup:
+        blocks.pop(0)
+    while blocks and not blocks[-1].markup:
+        blocks.pop()
+    for block in blocks:
+        if not block.markup:
+            block.markup = "&nbsp;"
+    return blocks
 
 
 def draw_rich_text(c, value, x, y, width, *, font_name="Helvetica", font_size=9.5,

@@ -15,8 +15,9 @@ function esc(v) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// Måste stämma med _HAS_MARKUP i backend/app/richtext.py
-const HAS_MARKUP = /<\/?(?:b|strong|i|em|u|br|div|p|ul|ol|li)\b[^>]*>/i;
+// Måste stämma med _HAS_MARKUP i backend/app/richtext.py. span finns med för
+// att Chrome lindar infogade tabbar i <span style="white-space:pre">.
+const HAS_MARKUP = /<\/?(?:b|strong|i|em|u|br|div|p|ul|ol|li|span)\b[^>]*>/i;
 
 const BUTTONS = [
   { cmd: 'bold', label: 'F', title: 'Fet (Ctrl+B)', style: 'font-weight:700' },
@@ -91,6 +92,16 @@ export function bindRichText(root) {
       if (e.key === 'Tab' && !e.shiftKey) {
         e.preventDefault();
         document.execCommand('insertText', false, '\t');
+        sync();
+        return;
+      }
+      // Enter hanteras själv i stället för att lämnas åt webbläsaren. Med
+      // white-space: pre-wrap gör Chrome olika saker beroende på var markören
+      // står – ibland <div>, ibland ett rent radbrytningstecken, ibland inget
+      // alls. insertLineBreak ger alltid ett <br>, som utskriften förstår.
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        document.execCommand('insertLineBreak');
         sync();
         return;
       }

@@ -61,14 +61,18 @@ def _out(lead: SalesLead, quote: FfbQuote) -> FfbQuoteOut:
 
 def _prefill(lead: SalesLead) -> FfbQuote:
     """Det vi redan vet ur förfrågan. Chassi, ritningsnummer och transportmedium
-    finns inte i Flow och lämnas tomma åt kunden."""
+    finns inte i Flow och lämnas tomma åt kunden.
+
+    Förfrågans Beskrivning följer med flit inte med. Den är en intern
+    sammanfattning av affären, inte en specifikation åt FFB, och hörde inte
+    hemma i dokumentet.
+    """
     return FfbQuote(
         lead_id=lead.id,
         doc_date=date.today(),
         product_type=lead.product_type,
         volume_approx=lead.size,
         country_of_registration=lead.customer.country if lead.customer else None,
-        special_feature=lead.description,
         terms_payment=DEFAULT_TERMS_PAYMENT,
         terms_delivery=DEFAULT_TERMS_DELIVERY,
     )

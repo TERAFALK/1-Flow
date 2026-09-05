@@ -11,7 +11,7 @@ from .routers import (
     work_orders, time_entries, dashboard,
     settings, contacts, phases, purchases, files, activities, tasks,
     pick_lists, sales_leads, sales_orders, sales_milestones, ffb_orders, ffb_quotes,
-    notes,
+    planning, absences, notes,
 )
 
 models.Base.metadata.create_all(bind=engine)
@@ -576,6 +576,8 @@ app.include_router(sales_orders.router)
 app.include_router(sales_milestones.router)
 app.include_router(ffb_orders.router)
 app.include_router(ffb_quotes.router)
+app.include_router(planning.router)
+app.include_router(absences.router)
 
 
 @app.on_event("startup")

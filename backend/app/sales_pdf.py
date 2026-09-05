@@ -8,7 +8,8 @@ from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 
 from .models import SalesLeadKind
-from .pdf_utils import draw_header, draw_info_panel, draw_paragraph, truncate
+from .pdf_utils import draw_header, draw_info_panel, draw_paragraph, truncate, wrap_lines
+from .richtext import draw_rich_text
 from .sales_common import lead_schedule, order_schedule
 
 MARGIN = 18 * mm
@@ -36,11 +37,12 @@ def _money(value, currency) -> str:
 class _Doc:
     """Håller reda på y-läget och sköter sidbrytningar."""
 
-    def __init__(self, title: str, subtitle: str):
+    def __init__(self, title: str, subtitle: str, footer: str = "Flow – Försäljning"):
         self.buf = io.BytesIO()
         self.c = canvas.Canvas(self.buf, pagesize=A4)
         self.title = title
         self.subtitle = subtitle
+        self.footer = footer
         self.y = draw_header(self.c, PAGE_W, title, subtitle) - 6 * mm
 
     def page_header(self) -> float:
@@ -132,10 +134,85 @@ class _Doc:
             min_y=MIN_Y, on_new_page=self.page_header,
         ) - 2 * mm
 
+    def rich(self, body: str):
+        """Formaterad brödtext ur redigeraren. ``text`` går via draw_paragraph,
+        som är ren text och skulle skriva ut taggarna som synliga tecken."""
+        if not body:
+            return
+        self.space(10 * mm)
+        self.y = draw_rich_text(
+            self.c, body, MARGIN, self.y, CONTENT_W,
+            min_y=MIN_Y, on_new_page=self.new_page,
+        ) - 2 * mm
+
+    def table_wrapped(self, headers, widths, rows, muted=None):
+        """Tabell där cellerna bryts över flera rader i stället för att kapas.
+
+        ``table`` klipper varje cell till en rad med ``truncate``. Det duger för
+        korta värden men förstör en beskrivningskolumn med hela meningar – texten
+        försvinner tyst. Här räknas radhöjden ur den högsta kolumnen.
+
+        ``muted`` är en lista med index för rader som ska ritas grå.
+        """
+        muted = set(muted or ())
+        font, size, line_h = "Helvetica", 8.5, 11
+
+        def head():
+            self.c.setFont("Helvetica-Bold", 8)
+            self.c.setFillColor(colors.HexColor("#5a6675"))
+            x = MARGIN
+            for h, w in zip(headers, widths):
+                self.c.drawString(x, self.y, h.upper())
+                x += w
+            self.y -= 2.5 * mm
+            self.c.setStrokeColor(colors.HexColor("#c3ccd6"))
+            self.c.setLineWidth(0.6)
+            self.c.line(MARGIN, self.y, PAGE_W - MARGIN, self.y)
+            self.y -= 4 * mm
+            self.c.setFillColor(colors.black)
+
+        self.space(20 * mm)
+        head()
+        if not rows:
+            self.c.setFont("Helvetica-Oblique", 9)
+            self.c.setFillColor(colors.HexColor("#888888"))
+            self.c.drawString(MARGIN, self.y, "Inga rader")
+            self.c.setFillColor(colors.black)
+            self.y -= 6 * mm
+            return
+
+        for index, row in enumerate(rows):
+            cells = [
+                wrap_lines(str(cell or ""), font, size, w - 3 * mm)
+                for cell, w in zip(row, widths)
+            ]
+            row_h = max(line_h * max(len(c) for c in cells), 12) + 3 * mm
+
+            if self.y - row_h < MIN_Y:
+                self.new_page()
+                head()
+
+            self.c.setFont(font, size)
+            self.c.setFillColor(colors.HexColor("#888888") if index in muted else colors.black)
+            x = MARGIN
+            for lines, w in zip(cells, widths):
+                ty = self.y
+                for line in lines:
+                    self.c.drawString(x, ty, line)
+                    ty -= line_h
+                x += w
+
+            self.y -= row_h
+            self.c.setFillColor(colors.black)
+            self.c.setStrokeColor(colors.HexColor("#e5e5e5"))
+            self.c.setLineWidth(0.4)
+            self.c.line(MARGIN, self.y + 2 * mm, PAGE_W - MARGIN, self.y + 2 * mm)
+            self.c.setStrokeColor(colors.black)
+
     def finish(self) -> io.BytesIO:
         self.c.setFont("Helvetica", 7.5)
         self.c.setFillColor(colors.HexColor("#9ba3ae"))
-        self.c.drawRightString(PAGE_W - MARGIN, 12 * mm, "Flow – Försäljning")
+        self.c.drawRightString(PAGE_W - MARGIN, 12 * mm, self.footer)
         self.c.save()
         self.buf.seek(0)
         return self.buf

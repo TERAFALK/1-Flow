@@ -102,6 +102,7 @@ def delete_user(
         (models.Activity, models.Activity.created_by),
         (models.WorkOrderFile, models.WorkOrderFile.uploaded_by),
         (models.PickList, models.PickList.created_by),
+        (models.PlanningMeeting, models.PlanningMeeting.created_by),
     ):
         db.query(model).filter(col == user_id).update({col: None}, synchronize_session=False)
     db.delete(user)

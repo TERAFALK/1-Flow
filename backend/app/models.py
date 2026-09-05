@@ -839,3 +839,134 @@ class FfbQuote(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     lead = relationship("SalesLead", back_populates="ffb_quote")
+
+
+# ── Planeringsmöte ────────────────────────────────────────────────────────────
+# Veckodokumentet som gås igenom fysiskt med verkstaden varje vecka. Ersätter en
+# Word-fil som skrevs om från grunden varje gång, trots att jobben pågår över
+# flera veckor och raderna därför till stor del är desamma.
+
+# Frånvarotyper. Medvetet vanlig text och inte ett Postgres-enum: ett enum
+# kräver ALTER TYPE för varje nytt värde, och de här är etiketter som mycket väl
+# kan behöva utökas.
+ABSENCE_KINDS = ("semester", "ledig", "sjuk", "annat")
+
+
+class PlanningMeeting(Base):
+    """Ett veckomöte. Nyckeln är ISO-året och ISO-veckan, inte kalenderåret:
+    vecka 1 2027 börjar 2026-12-28, så meeting_date.year skulle ge fel vecka."""
+    __tablename__ = "planning_meetings"
+    __table_args__ = (UniqueConstraint("iso_year", "iso_week", name="uq_planning_week"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    monday_date = Column(Date, nullable=False)            # veckans ankare
+    iso_year = Column(Integer, nullable=False, index=True)
+    iso_week = Column(Integer, nullable=False)
+    meeting_date = Column(Date)                           # mötet kan hållas fredagen innan
+
+    notes = Column(Text)                                  # Noteringar//
+    ffb_current = Column(Text)
+    open_quotes = Column(Text)
+    future_work = Column(Text)
+
+    # Rubrikerna är data och inte konstanter – "Arbete under 2026/27" innehåller
+    # ett årtal som måste gå att ändra utan att någon rör koden
+    ffb_heading = Column(String, default="Aktuellt FFB")
+    quotes_heading = Column(String, default="Pågående offerter")
+    future_heading = Column(String, default="Arbete under 2026/27")
+
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    days = relationship(
+        "PlanningMeetingDay", back_populates="meeting",
+        cascade="all, delete-orphan", order_by="PlanningMeetingDay.sort_order",
+    )
+    items = relationship(
+        "PlanningMeetingItem", back_populates="meeting",
+        cascade="all, delete-orphan", order_by="PlanningMeetingItem.sort_order",
+    )
+
+
+class PlanningMeetingDay(Base):
+    """En rad i Mån–Fre-schemat. Bär ett riktigt datum och inte ett veckodagsnummer,
+    så att frånvaro och planerade leveranser går att matcha utan att först räkna
+    ut vilken måndag veckan avser."""
+    __tablename__ = "planning_meeting_days"
+
+    id = Column(Integer, primary_key=True, index=True)
+    meeting_id = Column(
+        Integer, ForeignKey("planning_meetings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    day_date = Column(Date, nullable=False)
+    text = Column(Text)
+    sort_order = Column(Integer, default=0)
+
+    meeting = relationship("PlanningMeeting", back_populates="days")
+
+
+class PlanningMeetingItem(Base):
+    """En rad i tabellen "Pågående arbete/ej startat arbete".
+
+    customer_text är en ögonblicksbild av kundnamnet. Kunden kan raderas, och
+    raden ska ändå gå att läsa – samma grepp som artikelnumret på en orderrad.
+    """
+    __tablename__ = "planning_meeting_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    meeting_id = Column(
+        Integer, ForeignKey("planning_meetings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sort_order = Column(Integer, default=0)
+    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"))
+    customer_text = Column(String)
+    work_order_id = Column(Integer, ForeignKey("work_orders.id", ondelete="SET NULL"), index=True)
+    description = Column(Text)
+    # Bockas av under mötet. Avbockade rader följer inte med till nästa vecka
+    # och kommer inte med i utskriften.
+    done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    meeting = relationship("PlanningMeeting", back_populates="items")
+    customer = relationship("Customer")
+    work_order = relationship("WorkOrder")
+    assignees = relationship(
+        "PlanningItemAssignee", back_populates="item",
+        cascade="all, delete-orphan", order_by="PlanningItemAssignee.sort_order",
+    )
+
+
+class PlanningItemAssignee(Base):
+    """Ansvarig på en rad. Egen tabell och inte en lista med id:n i en JSON-kolumn:
+    borttagning av en användare släpper nullbara referenser för hand (se
+    routers/users.py), och en JSON-lista hade varit osynlig för den städningen."""
+    __tablename__ = "planning_item_assignees"
+    __table_args__ = (UniqueConstraint("item_id", "user_id", name="uq_planning_item_user"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(
+        Integer, ForeignKey("planning_meeting_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sort_order = Column(Integer, default=0)
+
+    item = relationship("PlanningMeetingItem", back_populates="assignees")
+    user = relationship("User")
+
+
+class UserAbsence(Base):
+    """Frånvaro för en person. Används av veckovyn för att visa vilka som är
+    borta, och för att kunna föreslå raden i Noteringar – aldrig för att skriva
+    något automatiskt."""
+    __tablename__ = "user_absences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    start_date = Column(Date, nullable=False, index=True)
+    end_date = Column(Date, nullable=False, index=True)
+    kind = Column(String, default="ledig")
+    note = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")

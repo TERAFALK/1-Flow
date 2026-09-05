@@ -8,6 +8,7 @@ import { renderArticles } from './pages/articles.js';
 import { renderScanner } from './pages/scanner.js';
 import { renderTimeEntries } from './pages/time-entries.js';
 import { renderCalendar } from './pages/calendar.js';
+import { renderPlanning, renderPlanningWeek } from './pages/planning.js';
 import { renderUsers } from './pages/users.js';
 import { renderSettings } from './pages/settings.js';
 import { renderPickLists } from './pages/pick-lists.js';
@@ -105,6 +106,7 @@ const PAGE_TITLES = {
   '/quotes':       'Offerter',
   '/time-entries': 'Tidrapportering',
   '/calendar':     'Kalender',
+  '/planning':     'Planeringsmöte',
   '/users':        'Användare',
   '/settings':     'Inställningar',
 };
@@ -149,6 +151,14 @@ async function route() {
   });
 
   try {
+    // Veckan i planeringsmötet adresseras som /planning/2026-36. Matchas här,
+    // före idMatch: att vidga den delade regexen hade fått /work-orders/new
+    // att matcha detaljgrenen och anropas med NaN.
+    const weekMatch = path.match(/^\/planning\/(\d{4})-(\d{1,2})$/);
+    if (weekMatch) {
+      return await renderPlanningWeek(content, parseInt(weekMatch[1]), parseInt(weekMatch[2]));
+    }
+
     const idMatch = path.match(/^(\/[\w-]+)\/(\d+)$/);
     if (idMatch) {
       const [, base, id] = idMatch;
@@ -177,6 +187,7 @@ async function route() {
       '/scanner':       renderScanner,
       '/time-entries':  renderTimeEntries,
       '/calendar':      renderCalendar,
+      '/planning':      renderPlanning,
       '/users':         renderUsers,
       '/settings':      renderSettings,
     };

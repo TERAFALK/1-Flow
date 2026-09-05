@@ -23,7 +23,19 @@ async function request(url, options = {}) {
   if (res.status === 204) return null;
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // detail är oftast en sträng, men en endpoint kan svara med ett objekt när
+    // felet bär data som anroparen behöver (t.ex. 409 med veckan som redan
+    // finns). Meddelandet plockas då ur objektet, och objektet följer med.
+    const detail = data.detail;
+    const structured = detail && typeof detail === 'object';
+    const error = new Error(
+      (structured ? detail.message : detail) || `HTTP ${res.status}`
+    );
+    if (structured) error.detail = detail;
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 

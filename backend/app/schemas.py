@@ -1228,4 +1228,150 @@ class FfbQuoteOut(FfbQuoteUpdate):
     contact_person: Optional[str] = None
 
 
+# ── Planeringsmöte ────────────────────────────────────────────────────────────
+
+class PlanningDayIn(BaseModel):
+    day_date: date
+    text: Optional[str] = None
+
+
+class PlanningDayOut(PlanningDayIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sort_order: int = 0
+
+
+class PlanningItemIn(BaseModel):
+    customer_id: Optional[int] = None
+    customer_text: Optional[str] = None
+    work_order_id: Optional[int] = None
+    description: Optional[str] = None
+    done: Optional[bool] = None
+    sort_order: Optional[int] = None
+    # Ansvariga i visningsordning. Tom lista rensar raden.
+    assignee_ids: Optional[List[int]] = None
+
+
+class PlanningItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sort_order: int = 0
+    customer_id: Optional[int] = None
+    customer_text: Optional[str] = None
+    work_order_id: Optional[int] = None
+    description: Optional[str] = None
+    done: bool = False
+    assignee_ids: List[int] = []
+    assignee_names: List[str] = []
+    # Härleds ur arbetsordern vid läsning, sparas aldrig: en order kan bli klar
+    # mitt i veckan och raden ska följa med direkt
+    work_order_number: Optional[str] = None
+    work_order_status: Optional[str] = None
+    work_order_done: bool = False
+
+
+class PlanningMeetingCopy(BaseModel):
+    """Vad som följer med när en vecka skapas ur en tidigare."""
+    items: bool = True
+    sections: bool = True
+    notes: bool = False
+    days: bool = False
+
+
+class PlanningMeetingCreate(BaseModel):
+    # Ett datum och inte år+vecka – all ISO-aritmetik blir då stdlib
+    monday: Optional[date] = None
+    copy_from_id: Optional[int] = None
+    copy: PlanningMeetingCopy = PlanningMeetingCopy()
+
+
+class PlanningMeetingUpdate(BaseModel):
+    meeting_date: Optional[date] = None
+    notes: Optional[str] = None
+    ffb_current: Optional[str] = None
+    open_quotes: Optional[str] = None
+    future_work: Optional[str] = None
+    ffb_heading: Optional[str] = None
+    quotes_heading: Optional[str] = None
+    future_heading: Optional[str] = None
+    days: Optional[List[PlanningDayIn]] = None
+
+
+class PlanningMeetingListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    iso_year: int
+    iso_week: int
+    monday_date: date
+    meeting_date: Optional[date] = None
+    item_count: int = 0
+    done_count: int = 0
+    # Rader vars arbetsorder blivit klar – "att stryka" på nästa möte
+    stale_count: int = 0
+    updated_at: Optional[datetime] = None
+
+
+class PlanningMeetingOut(PlanningMeetingListItem):
+    notes: Optional[str] = None
+    ffb_current: Optional[str] = None
+    open_quotes: Optional[str] = None
+    future_work: Optional[str] = None
+    ffb_heading: Optional[str] = None
+    quotes_heading: Optional[str] = None
+    future_heading: Optional[str] = None
+    days: List[PlanningDayOut] = []
+    items: List[PlanningItemOut] = []
+    absences: List["AbsenceOut"] = []
+
+
+class PlanningArchive(BaseModel):
+    """Arkivlistan plus veckan som knappen "Skapa vecka NN" ska sikta på.
+    Räknas i backend så att gränssnittet slipper göra ISO-matematik."""
+    weeks: List[PlanningMeetingListItem] = []
+    next_year: int
+    next_week: int
+    next_monday: date
+
+
+class PlanningSuggestion(BaseModel):
+    """En öppen arbetsorder som aldrig förekommit på något planeringsmöte."""
+    work_order_id: int
+    order_number: str
+    customer_id: Optional[int] = None
+    customer_name: str = ""
+    description: str = ""
+    assignee_ids: List[int] = []
+    status: str
+
+
+# ── Frånvaro ──────────────────────────────────────────────────────────────────
+
+class AbsenceCreate(BaseModel):
+    user_id: int
+    start_date: date
+    end_date: date
+    kind: str = "ledig"
+    note: Optional[str] = None
+
+
+class AbsenceUpdate(BaseModel):
+    user_id: Optional[int] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    kind: Optional[str] = None
+    note: Optional[str] = None
+
+
+class AbsenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int
+    user_name: str = ""
+    start_date: date
+    end_date: date
+    kind: str
+    note: Optional[str] = None
+
+
+PlanningMeetingOut.model_rebuild()
 Token.model_rebuild()

@@ -103,6 +103,36 @@ MAX_LABEL_CHARS = 40
 MIN_BODY_COLUMN = 24
 
 
+def _balance(markup: str) -> str:
+    """Gör ett taggfragment fristående.
+
+    Taggar som lämnats öppna stängs sist, och taggar som stängs utan att ha
+    öppnats i fragmentet öppnas först. Behövs när en rad delas i två spalter:
+    snittet kan gå rakt igenom en fetstil, och ``Paragraph`` fallerar på ett
+    fragment som inte är balanserat för sig.
+    """
+    open_tags = []
+    reopen = []
+    for match in re.finditer(r"</?(\w+)>", markup):
+        tag = match.group(1)
+        if match.group(0).startswith("</"):
+            if tag in open_tags:
+                # Stäng till och med taggen, även om nästlingen är slarvig
+                while open_tags and open_tags.pop() != tag:
+                    pass
+            else:
+                reopen.append(tag)
+        else:
+            open_tags.append(tag)
+    # Taggarna som ska öppnas först är de som stängs sist: "c</i></b>" var en
+    # gång "<b><i>c</i></b>", så prefixet måste bli <b><i> och inte <i><b>.
+    return (
+        "".join(f"<{t}>" for t in reversed(reopen))
+        + markup
+        + "".join(f"</{t}>" for t in reversed(open_tags))
+    )
+
+
 def _visible_column(markup: str) -> int:
     """Antal synliga tecken i markup – taggar och entiteter räknas som noll
     respektive ett, precis som när tabbarna expanderades."""
@@ -137,7 +167,10 @@ def _split_label(markup: str):
     # De återstående mellanrummen i beskrivningen är Words radbrytningar och
     # ska bli vanliga ordmellanrum, inte hål i texten
     body = re.sub(r"[ " + TAB_MARK + r"]{2,}", " ", body).strip()
-    return label.rstrip().replace(TAB_MARK, " "), body
+    # Delningen kan gå rakt igenom en fetstil ("<b>FFB type<tabb>...</b>"), och
+    # då blir båda halvorna obalanserade var för sig. Paragraph kräver att varje
+    # fragment står på egna ben.
+    return _balance(label.rstrip().replace(TAB_MARK, " ")), _balance(body)
 
 
 def _keep_gaps(markup: str) -> str:
@@ -290,6 +323,21 @@ def to_blocks(value: str) -> list:
     return blocks
 
 
+def _paragraph(markup: str, style, **kwargs) -> Paragraph:
+    """``Paragraph`` med skyddsnät.
+
+    Texten är skriven av en användare och går genom flera omskrivningar innan
+    den hamnar här. Skulle något fragment ändå bli markup ReportLab inte
+    accepterar ska dokumentet tappa formateringen på den raden – inte fallera.
+    Utskriften sker under sparningen av formuläret, så ett undantag här skulle
+    annars göra att ingenting alls gick att spara.
+    """
+    try:
+        return Paragraph(markup, style, **kwargs)
+    except Exception:
+        return Paragraph(html.escape(plain_text(markup), quote=False), style, **kwargs)
+
+
 def _draw_label_row(c, block, x, y, width, label_col, style, *, min_y, on_new_page):
     """Ritar en spaltrad och returnerar y-läget under den.
 
@@ -297,8 +345,8 @@ def _draw_label_row(c, block, x, y, width, label_col, style, *, min_y, on_new_pa
     stället för att etiketten blir ensam kvar. Är beskrivningen längre än en
     hel sida delas den ändå, annars hade den aldrig fått plats.
     """
-    label = Paragraph(block.label, style)
-    body = Paragraph(block.markup, style)
+    label = _paragraph(block.label, style)
+    body = _paragraph(block.markup, style)
     label_w = max(label_col - 6, 20)
     body_w = width - label_col
 
@@ -381,7 +429,7 @@ def draw_rich_text(c, value, x, y, width, *, font_name="Helvetica", font_size=9.
 
         # bulletText låter Paragraph rita punkten själv, så den hamnar rätt även
         # när stycket delas över en sidbrytning
-        para = Paragraph(
+        para = _paragraph(
             block.markup,
             block_style,
             bulletText="•" if block.bullet else None,

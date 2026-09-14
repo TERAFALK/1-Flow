@@ -15,9 +15,12 @@ döljs i gränssnittet – resten av offertförfrågan fungerar som vanligt.
 """
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from .richtext import balance_tags
 
 def _read_key() -> str:
     """Nyckeln ur miljön, städad.
@@ -71,8 +74,25 @@ def translate_html(texts: list, target_lang: str = "SV") -> list:
     if not positions:
         return list(texts)
 
+    out = list(texts)
+    # DeepL tar högst 50 texter per anrop. En lång specifikation delad per rad
+    # och spalt blir lätt fler än så.
+    for start in range(0, len(positions), MAX_TEXTS_PER_REQUEST):
+        chunk = positions[start:start + MAX_TEXTS_PER_REQUEST]
+        translated = _request([texts[i] for i in chunk], target_lang)
+        for position, text in zip(chunk, translated):
+            out[position] = text
+    return out
+
+
+# DeepL:s gräns för antal texter i ett anrop
+MAX_TEXTS_PER_REQUEST = 50
+
+
+def _request(texts: list, target_lang: str) -> list:
+    """Ett anrop mot DeepL med en redan filtrerad, icke-tom lista texter."""
     fields = [("target_lang", target_lang), ("tag_handling", "html")]
-    fields += [("text", texts[i]) for i in positions]
+    fields += [("text", text) for text in texts]
     body = urllib.parse.urlencode(fields).encode()
 
     request = urllib.request.Request(
@@ -95,13 +115,75 @@ def translate_html(texts: list, target_lang: str = "SV") -> list:
         raise TranslationError("Oväntat svar från DeepL") from exc
 
     translations = payload.get("translations") or []
-    if len(translations) != len(positions):
+    if len(translations) != len(texts):
         raise TranslationError("DeepL svarade med fel antal översättningar")
+    return [t.get("text", original) for t, original in zip(translations, texts)]
 
-    out = list(texts)
-    for position, translation in zip(positions, translations):
-        out[position] = translation.get("text", texts[position])
-    return out
+
+# ── Struktur ──────────────────────────────────────────────────────────────────
+# Det som bär textens form och därför aldrig får skickas till DeepL: rad-
+# brytningar, tabbar (Chrome lindar dem i <span style="white-space:pre">),
+# blocktaggar och indrag av två eller fler blanksteg.
+#
+# I HTML-läge fäller DeepL ihop blanksteg, precis som en webbläsare gör – ett
+# radbrytningstecken blir ett mellanslag och ett indrag på tolv blanksteg blir
+# ett. Skickas texten som den är kommer den tillbaka som en enda lång rad.
+_STRUCTURE = re.compile(
+    r"(\r?\n"
+    r"|<span\b[^>]*>[ \t]+</span>"
+    r"|\t+"
+    r"|</?(?:div|p|ul|ol|li|br)\b[^>]*>"
+    r"|(?:&nbsp;| ){2,})",
+    re.I,
+)
+
+
+def _has_text(fragment: str) -> bool:
+    without_tags = re.sub(r"<[^>]+>", "", fragment)
+    return bool(re.sub(r"&nbsp;|&#160;|\s", "", without_tags))
+
+
+def translate_structured(values: list, target_lang: str = "SV") -> list:
+    """Översätter formaterad text och behåller dess form exakt.
+
+    Varje värde delas i struktur och text. Strukturen – radbrytningar, tabbar,
+    indrag, blocktaggar – sätts tillbaka tecken för tecken, och bara textbitarna
+    däremellan skickas till DeepL. En teknisk specifikation med rubrik i
+    vänsterkant och indragna rader under kommer då tillbaka med samma layout.
+
+    Fetstil och kursiv följer med textbitarna, så DeepL kan flytta dem rätt när
+    ordföljden ändras. En fetstil som korsar en tabb delas i två balanserade
+    delar innan den skickas; resultatet ser likadant ut men är välformat, vilket
+    DeepL kräver för att hantera taggarna.
+
+    Priset är att en mening som Word bröt mitt itu över en tabb översätts som
+    två delar. Det är ett mindre fel än att hela layouten försvinner.
+    """
+    plans = []
+    queue = []
+    for value in values:
+        plan = []
+        for index, part in enumerate(_STRUCTURE.split(value or "")):
+            # Udda index är det som matchade mönstret, alltså strukturen
+            if index % 2 == 1 or not _has_text(part):
+                plan.append(part)
+                continue
+            core = part.strip()
+            lead = part[:len(part) - len(part.lstrip())]
+            trail = part[len(part.rstrip()):]
+            plan.append((lead, len(queue), trail))
+            queue.append(balance_tags(core))
+        plans.append(plan)
+
+    translated = translate_html(queue, target_lang) if queue else []
+
+    return [
+        "".join(
+            piece if isinstance(piece, str) else piece[0] + translated[piece[1]] + piece[2]
+            for piece in plan
+        )
+        for plan in plans
+    ]
 
 
 def _http_message(code: int) -> str:

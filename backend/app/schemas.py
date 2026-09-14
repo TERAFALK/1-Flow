@@ -571,6 +571,12 @@ class WorkOrderListItem(BaseModel):
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
+class LineQuantityUpdate(BaseModel):
+    """Rättning av antal från skannern. 0 tar bort raden – en felskannad
+    artikel är det vanligaste skälet att rätta."""
+    quantity: Decimal
+
+
 class ScanResult(BaseModel):
     article: Optional[ArticleOut] = None
     article_name: str

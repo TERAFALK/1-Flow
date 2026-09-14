@@ -176,7 +176,9 @@ def translate_ffb_quote(
     quote = _get_or_create(db, lead)
 
     try:
-        request_sv, special_sv = translate.translate_html(
+        # Strukturbevarande: indrag, radbrytningar och tabbar sätts tillbaka
+        # exakt, och bara texten däremellan går till DeepL
+        request_sv, special_sv = translate.translate_structured(
             [quote.request_text or "", quote.special_feature or ""]
         )
     except translate.TranslationError as exc:

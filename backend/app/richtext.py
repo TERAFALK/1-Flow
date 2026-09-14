@@ -103,7 +103,7 @@ MAX_LABEL_CHARS = 40
 MIN_BODY_COLUMN = 24
 
 
-def _balance(markup: str) -> str:
+def balance_tags(markup: str) -> str:
     """Gör ett taggfragment fristående.
 
     Taggar som lämnats öppna stängs sist, och taggar som stängs utan att ha
@@ -170,7 +170,7 @@ def _split_label(markup: str):
     # Delningen kan gå rakt igenom en fetstil ("<b>FFB type<tabb>...</b>"), och
     # då blir båda halvorna obalanserade var för sig. Paragraph kräver att varje
     # fragment står på egna ben.
-    return _balance(label.rstrip().replace(TAB_MARK, " ")), _balance(body)
+    return balance_tags(label.rstrip().replace(TAB_MARK, " ")), balance_tags(body)
 
 
 def _keep_gaps(markup: str) -> str:

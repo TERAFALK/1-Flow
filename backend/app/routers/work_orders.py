@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.responses import StreamingResponse
-from sqlalchemy import nulls_last
+from sqlalchemy import func, nulls_last
 from sqlalchemy.orm import Session, joinedload
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
@@ -18,7 +18,7 @@ from ..richtext import draw_rich_text
 from ..schemas import (
     WorkOrderCreate, WorkOrderUpdate, WorkOrderOut, WorkOrderListItem,
     WorkOrderLineCreate, WorkOrderLineUpdate, WorkOrderLineOut, WorkOrderLineBulkCreate,
-    ScanResult,
+    ScanResult, LineQuantityUpdate,
 )
 from ..models import (
     WorkOrder, WorkOrderLine, WorkOrderStatus, Article, StockTransaction,
@@ -307,6 +307,82 @@ def delete_line(
 
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
+
+@router.put("/{order_id}/lines/{line_id}/quantity", response_model=Optional[WorkOrderLineOut])
+def set_scanned_quantity(
+    order_id: int,
+    line_id: int,
+    body: LineQuantityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Rättar antalet på en rad från skannern. 0 tar bort raden.
+
+    Varje skanning drar en enhet från lagret, så en rättelse måste flytta lagret
+    lika mycket – annars blir lagersaldot fel för varje felskanning som rättas.
+    ``update_line`` gör inte det och går därför inte att använda här.
+
+    En sänkning lägger tillbaka i lagret, men aldrig mer än ordern faktiskt har
+    dragit för artikeln. En rad kan ha fått en del av sitt antal inskrivet för
+    hand, utan lagerdragning, och då skulle en full återföring blåsa upp saldot.
+    """
+    if body.quantity < 0:
+        raise HTTPException(status_code=400, detail="Antalet kan inte vara negativt")
+
+    wo = db.get(WorkOrder, order_id)
+    if not wo:
+        raise HTTPException(status_code=404, detail="Arbetsorder ej hittad")
+    line = db.query(WorkOrderLine).filter(
+        WorkOrderLine.id == line_id, WorkOrderLine.work_order_id == order_id
+    ).first()
+    if not line:
+        raise HTTPException(status_code=404, detail="Rad ej hittad")
+
+    old_quantity = line.quantity
+    delta = body.quantity - old_quantity
+
+    if line.article_id and delta != 0:
+        article = db.get(Article, line.article_id)
+        if delta > 0:
+            change = -delta                       # plockat mer – dra ur lagret
+        else:
+            # Lagersaldot som ordern hittills dragit för artikeln, netto
+            drawn = -(
+                db.query(func.coalesce(func.sum(StockTransaction.quantity), 0))
+                .filter(
+                    StockTransaction.work_order_id == order_id,
+                    StockTransaction.article_id == line.article_id,
+                )
+                .scalar()
+            )
+            change = min(-delta, max(Decimal(drawn), Decimal("0")))
+        if article and change:
+            article.stock_quantity = article.stock_quantity + change
+            db.add(StockTransaction(
+                article_id=article.id,
+                quantity=change,
+                transaction_type=StockTransactionType.justering,
+                work_order_id=order_id,
+                user_id=current_user.id,
+                notes=(
+                    f"Rättad i skannern på {wo.order_number}: "
+                    f"{old_quantity.normalize():f} → {body.quantity.normalize():f} {line.unit or 'st'}"
+                ),
+            ))
+
+    if body.quantity == 0:
+        db.delete(line)
+        db.commit()
+        return None
+
+    line.quantity = body.quantity
+    db.commit()
+    return (
+        db.query(WorkOrderLine)
+        .options(joinedload(WorkOrderLine.article))
+        .get(line_id)
+    )
+
 
 @router.post("/{order_id}/scan", response_model=ScanResult)
 def scan_article(

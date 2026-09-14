@@ -22,10 +22,14 @@ _TEKNIKER_ALLOWLIST: tuple[tuple[str, re.Pattern], ...] = (
     ("GET",  re.compile(r"^/api/work-orders$")),
     ("GET",  re.compile(r"^/api/work-orders/\d+/lines$")),
     ("POST", re.compile(r"^/api/work-orders/\d+/scan$")),
+    # Rätta antal på en skannad rad (0 tar bort). Egen väg som bara ändrar
+    # antalet – teknikern får inte skriva om beskrivning eller pris.
+    ("PUT",  re.compile(r"^/api/work-orders/\d+/lines/\d+/quantity$")),
     ("POST", re.compile(r"^/api/pick-lists$")),
     ("GET",  re.compile(r"^/api/pick-lists/\d+$")),
     ("PUT",  re.compile(r"^/api/pick-lists/\d+$")),   # döpa om en tillfällig lista
     ("POST", re.compile(r"^/api/pick-lists/\d+/scan$")),
+    ("PUT",  re.compile(r"^/api/pick-lists/\d+/lines/\d+/quantity$")),
     ("GET",  re.compile(r"^/api/pick-lists/\d+/pdf$")),
 )
 

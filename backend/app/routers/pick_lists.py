@@ -1,6 +1,6 @@
 import io
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
@@ -14,6 +14,7 @@ from ..deps import get_current_user
 from ..schemas import (
     PickListCreate, PickListUpdate, PickListOut, PickListListItem,
     PickListLineCreate, PickListLineUpdate, PickListLineOut, PickListScanResult,
+    LineQuantityUpdate,
 )
 from ..models import PickList, PickListLine, Article, User
 from ..pdf_utils import draw_header
@@ -123,6 +124,39 @@ def delete_line(pick_list_id: int, line_id: int, db: Session = Depends(get_db), 
         raise HTTPException(status_code=404, detail="Rad ej hittad")
     db.delete(line)
     db.commit()
+
+
+@router.put("/{pick_list_id}/lines/{line_id}/quantity", response_model=Optional[PickListLineOut])
+def set_scanned_quantity(
+    pick_list_id: int,
+    line_id: int,
+    body: LineQuantityUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Rättar antalet på en skannad rad. 0 tar bort raden.
+
+    En egen väg och inte ``update_line``, så att teknikern bara får ändra antal
+    och ta bort – inte skriva om beskrivning eller enhet. Plocklistor drar inte
+    från lagret, så här finns inget saldo att justera.
+    """
+    if body.quantity < 0:
+        raise HTTPException(status_code=400, detail="Antalet kan inte vara negativt")
+    line = db.query(PickListLine).filter(
+        PickListLine.id == line_id, PickListLine.pick_list_id == pick_list_id
+    ).first()
+    if not line:
+        raise HTTPException(status_code=404, detail="Rad ej hittad")
+
+    if body.quantity == 0:
+        db.delete(line)
+        db.commit()
+        return None
+
+    line.quantity = body.quantity
+    db.commit()
+    line = db.query(PickListLine).options(joinedload(PickListLine.article)).get(line_id)
+    return PickListLineOut.from_line(line)
 
 
 @router.post("/{pick_list_id}/scan", response_model=PickListScanResult)

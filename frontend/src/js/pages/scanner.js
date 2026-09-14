@@ -1,5 +1,6 @@
 import { api, downloadFile } from '../api.js';
 import { showToast } from '../components/toast.js';
+import { confirmDialog } from '../components/modal.js';
 
 export async function renderScanner(el) {
   const orders = await api.get('/work-orders').catch(() => []);
@@ -368,6 +369,47 @@ export async function renderScanner(el) {
     feedback._timer = setTimeout(() => { feedback.style.display = 'none'; }, 4000);
   }
 
+  // ── Rätta antal ─────────────────────────────────────────────────────────────
+  // En väntande sparning per rad. − och + i snabb följd blir en enda sparning
+  // med slutvärdet, och därmed en enda lagerjustering i stället för en per tryck.
+  const pending = new Map();
+
+  function quantityUrl(lineId) {
+    const id = currentTargetId();
+    return mode === 'order'
+      ? `/work-orders/${id}/lines/${lineId}/quantity`
+      : `/pick-lists/${id}/lines/${lineId}/quantity`;
+  }
+
+  async function saveQuantity(lineId, quantity) {
+    const targetId = currentTargetId();
+    try {
+      await api.put(quantityUrl(lineId), { quantity });
+      showToast(quantity === 0 ? 'Rad borttagen' : 'Antal ändrat', 'success', 1500);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+    await refreshLines(targetId);
+  }
+
+  function queueSave(lineId, quantity) {
+    clearTimeout(pending.get(lineId));
+    pending.set(lineId, setTimeout(() => {
+      pending.delete(lineId);
+      saveQuantity(lineId, quantity);
+    }, 450));
+  }
+
+  async function removeLine(lineId, name) {
+    if (!await confirmDialog(`Ta bort <strong>${esc(name)}</strong> från listan?`, 'Ta bort')) return;
+    clearTimeout(pending.get(lineId));
+    pending.delete(lineId);
+    await saveQuantity(lineId, 0);
+  }
+
+  /** Visar antalet utan onödiga decimaler: 3.00 → 3, 2.50 → 2.5 */
+  const fmtQty = (q) => String(Number(q));
+
   async function refreshLines(targetId) {
     const lines = mode === 'order'
       ? await api.get(`/work-orders/${targetId}/lines`).catch(() => [])
@@ -378,18 +420,74 @@ export async function renderScanner(el) {
     }
     linesBody.innerHTML = `
       <table style="width:100%">
-        <thead><tr><th>Artikel</th><th class="text-right">Antal</th></tr></thead>
+        <thead><tr><th>Artikel</th><th class="text-right">Antal</th><th></th></tr></thead>
         <tbody>
           ${lines.map(l => `
             <tr>
-              <td><strong>${l.description}</strong>
-                ${(l.article_number || l.article?.article_number) ? `<br><small class="font-mono text-muted">${l.article_number || l.article?.article_number}</small>` : ''}
+              <td><strong>${esc(l.description)}</strong>
+                ${(l.article_number || l.article?.article_number) ? `<br><small class="font-mono text-muted">${esc(l.article_number || l.article?.article_number)}</small>` : ''}
               </td>
-              <td class="text-right">${l.quantity} ${l.unit}</td>
+              <td class="text-right" style="white-space:nowrap">
+                <div class="qty-control">
+                  <button type="button" class="qty-btn" data-qty-step="-1" data-line="${l.id}" aria-label="Minska">−</button>
+                  <input type="text" class="qty-input" inputmode="decimal" autocomplete="off"
+                         data-line="${l.id}" data-name="${esc(l.description)}" value="${fmtQty(l.quantity)}">
+                  <button type="button" class="qty-btn" data-qty-step="1" data-line="${l.id}" aria-label="Öka">+</button>
+                </div>
+                <span class="text-muted" style="font-size:12px">${esc(l.unit || '')}</span>
+              </td>
+              <td style="width:30px">
+                <button type="button" class="btn-icon" data-remove-line="${l.id}" data-name="${esc(l.description)}" title="Ta bort rad">×</button>
+              </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     `;
+
+    linesBody.querySelectorAll('[data-qty-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = linesBody.querySelector(`.qty-input[data-line="${btn.dataset.line}"]`);
+        // − stannar på 1. Att ta bort en rad ska vara ett eget, avsiktligt val –
+        // inte något som händer för att någon tryckte en gång för mycket.
+        const next = Math.max(1, (Number(input.value) || 0) + Number(btn.dataset.qtyStep));
+        input.value = fmtQty(next);
+        queueSave(Number(btn.dataset.line), next);
+        // Knappen tog fokus från skannerfältet – lämna tillbaka det, annars
+        // hamnar nästa skanning ingenstans
+        if (scanning) setTimeout(() => document.getElementById('scanner-input').focus(), 0);
+      });
+    });
+
+    linesBody.querySelectorAll('.qty-input').forEach(input => {
+      // Skannern skriver in i det fält som har fokus. Pausa medan antalet skrivs
+      // in för hand, samma som när listan döps om.
+      input.addEventListener('focus', () => { if (scanning) stopScanning(); });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      });
+      input.addEventListener('change', () => {
+        const raw = String(input.value).trim().replace(',', '.');
+        // Tömt fält betyder "ingen ändring", inte 0 – annars dyker frågan om att
+        // ta bort raden upp bara för att någon råkade radera siffran
+        if (raw === '') { refreshLines(currentTargetId()); return; }
+        const value = Number(raw);
+        if (!Number.isFinite(value) || value < 0) {
+          showToast('Ange ett antal på 0 eller mer', 'error');
+          refreshLines(currentTargetId());
+          return;
+        }
+        if (value === 0) { removeLine(Number(input.dataset.line), input.dataset.name); return; }
+        clearTimeout(pending.get(Number(input.dataset.line)));
+        saveQuantity(Number(input.dataset.line), value);
+      });
+    });
+
+    linesBody.querySelectorAll('[data-remove-line]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (scanning) stopScanning();
+        removeLine(Number(btn.dataset.removeLine), btn.dataset.name);
+      });
+    });
   }
 }

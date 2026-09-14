@@ -5,7 +5,7 @@ import { openCustomerForm } from './customers.js';
 import { renderGantt } from '../components/gantt.js';
 import { makeAllSearchable } from '../components/combobox.js';
 import { notesCardHtml, bindNotes } from '../components/notes.js';
-import { richTextField, bindRichText } from '../components/richtext.js';
+import { richTextField, bindRichText, alignColumns } from '../components/richtext.js';
 import { tasksCardHtml, bindTasks } from '../components/tasks.js';
 
 // ── Gemensamma hjälpare ───────────────────────────────────────────────────────
@@ -1768,7 +1768,7 @@ function ffbQuoteCardHtml(quote) {
 /** Fälten följer mallens indelning. Till skillnad från beställningen finns här
  *  inga antal, offertnummer eller leveranstider – de är inte bestämda när man
  *  ber om ett pris. */
-function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
+function openFfbQuoteForm(leadId, customerId, quote, onSaved, { justTranslated = false } = {}) {
   const f = (name, label, opts = {}) => `
     <div class="field">
       <label>${esc(label)}</label>
@@ -1858,6 +1858,23 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
 
   bindRichText(document.getElementById('ffbq-form'));
 
+  // Efter en översättning har etiketterna ny längd, och samma antal tabbar som
+  // i originalet landar på fel ställe. Rada upp den svenska texten och spara
+  // resultatet direkt, så att det som ligger lagrat är det som syns här.
+  if (justTranslated) {
+    const wrap = document.querySelector('[data-rich-for="request_text_sv"]');
+    const editor = wrap?.querySelector('.richtext-input');
+    if (editor) {
+      alignColumns(editor).then(async (changed) => {
+        if (!changed) return;
+        wrap.querySelector('input[type="hidden"]').value = editor.innerHTML;
+        try {
+          await api.put(`/sales/leads/${leadId}/ffb-quote`, { request_text_sv: editor.innerHTML });
+        } catch (err) { showToast(err.message, 'error'); }
+      });
+    }
+  }
+
   document.getElementById('ffbq-translate-btn')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     // Spara först: det är texten i formuläret som ska översättas, inte den
@@ -1873,7 +1890,7 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved) {
       const updated = await api.post(`/sales/leads/${leadId}/ffb-quote/translate`, {});
       showToast('Översatt – läs igenom och rätta vid behov', 'success');
       closeModal();
-      openFfbQuoteForm(leadId, customerId, updated, onSaved);
+      openFfbQuoteForm(leadId, customerId, updated, onSaved, { justTranslated: true });
     } catch (err) {
       showToast(err.message, 'error');
       btn.disabled = false;

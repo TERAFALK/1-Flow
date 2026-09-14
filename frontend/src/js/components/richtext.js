@@ -46,7 +46,14 @@ const MIN_BODY_COLUMN = 24;
 const PDF_TAB_COLUMNS = 8;
 
 const LINE_SEPARATOR = /(\n|<br\s*\/?>|<\/div>\s*<div[^>]*>|<\/?div[^>]*>)/i;
-const TAB_RUN = /(?:<span\b[^>]*>\t+<\/span>|\t)+/;
+
+// Ett gap mellan etikett och värde. Text som klistrats in från Word har ofta
+// mellanslag mellan tabbarna ("\t \t") eller före värdet; de hör till samma gap.
+// Utan det lästes raden som två tabbföljder – alltså som en tabell – och
+// lämnades utan att radas upp.
+const GAP_SPACE = '(?:[ \\u00a0]|&nbsp;)';
+const ONE_TAB = '(?:<span\\b[^>]*>[\\t \\u00a0]*\\t[\\t \\u00a0]*<\\/span>|\\t)';
+const TAB_RUN = new RegExp(`${GAP_SPACE}*${ONE_TAB}(?:${GAP_SPACE}*${ONE_TAB})*${GAP_SPACE}*`);
 
 function visibleText(markup) {
   const el = document.createElement('div');
@@ -72,8 +79,9 @@ function parseLabelRow(line) {
   return {
     label, value, labelText,
     bold: /<(?:b|strong)\b/i.test(label),
-    // Chrome lindar tabbarna i en span – behåll samma form på den nya raden
-    spanOpen: match[0].startsWith('<span') ? match[0].match(/^<span\b[^>]*>/)[0] : null,
+    // Chrome lindar tabbarna i en span – behåll samma form på den nya raden.
+    // Gapet ersätts helt, så mellanslag som låg i det försvinner också.
+    spanOpen: (match[0].match(/<span\b[^>]*>/) || [null])[0],
   };
 }
 

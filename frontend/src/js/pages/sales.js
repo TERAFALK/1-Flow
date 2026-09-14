@@ -1846,7 +1846,7 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved, { justTranslated =
         </div>
         <div class="field">
           <label style="font-size:12px">Offertförfrågan, text (svenska)</label>
-          ${richTextField('request_text_sv', quote.request_text_sv)}
+          ${richTextField('request_text_sv', quote.request_text_sv, { alignWith: 'request_text' })}
         </div>
 
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
@@ -1865,7 +1865,10 @@ function openFfbQuoteForm(leadId, customerId, quote, onSaved, { justTranslated =
     const wrap = document.querySelector('[data-rich-for="request_text_sv"]');
     const editor = wrap?.querySelector('.richtext-input');
     if (editor) {
-      alignColumns(editor).then(async (changed) => {
+      // Den engelska texten är förlagan – den svenska ska ha sina värden i samma
+      // kolumn, inte så tätt intill etiketterna som möjligt
+      const reference = document.querySelector('[data-rich-for="request_text"] .richtext-input');
+      alignColumns(editor, { reference }).then(async (changed) => {
         if (!changed) return;
         wrap.querySelector('input[type="hidden"]').value = editor.innerHTML;
         try {

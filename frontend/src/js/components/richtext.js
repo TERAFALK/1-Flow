@@ -78,6 +78,7 @@ function parseLabelRow(line) {
   if (labelText.trim().length > MAX_LABEL_CHARS) return null;
   return {
     label, value, labelText,
+    gap: match[0],
     bold: /<(?:b|strong)\b/i.test(label),
     // Chrome lindar tabbarna i en span – behåll samma form på den nya raden.
     // Gapet ersätts helt, så mellanslag som låg i det försvinner också.
@@ -95,8 +96,16 @@ function pdfColumn(chars, tabs) {
 /**
  * Radar upp värdena i alla block av spaltrader. Ändrar bara antalet tabbar
  * mellan etikett och värde – aldrig texten. Returnerar true om något ändrades.
+ *
+ * Kolumnen väljs så att texten ser ut som den skrevs, inte så tätt som möjligt:
+ *  - med ``reference`` (originalet till en översättning) hamnar värdena där de
+ *    står i originalet, rad för rad – den svenska texten ska se ut som den
+ *    engelska, bara med andra ord.
+ *  - utan förlaga följer blocket den rad vars värde redan står längst ut, så att
+ *    en kolumn som någon lagt långt till höger inte dras ihop.
+ * I båda fallen minst så långt ut att den bredaste etiketten får plats.
  */
-export async function alignColumns(editor) {
+export async function alignColumns(editor, { reference = null } = {}) {
   // Typsnittet måste vara laddat, annars mäts reservtypsnittet
   if (document.fonts?.ready) { try { await document.fonts.ready; } catch { /* mät ändå */ } }
 
@@ -122,9 +131,22 @@ export async function alignColumns(editor) {
     while (pos < target - 0.01 && count < 60) { pos = nextStop(pos); count++; }
     return Math.max(count, 1);
   };
+  // Var värdet hamnar i dag: etikettens bredd plus gapet, tecken för tecken
+  const valueStart = (row) => {
+    let pos = widthOf(row);
+    for (const ch of visibleText(row.gap)) pos = ch === '\t' ? nextStop(pos) : pos + space;
+    return pos;
+  };
+  // Mål hamnar alltid på ett tabbstopp – där tabbarna faktiskt kan landa
+  const onStop = (pos) => stop * Math.ceil(pos / stop - 0.001);
 
   const original = editor.innerHTML;
   const parts = original.split(LINE_SEPARATOR);
+  // Förlagan måste ha exakt samma radindelning, annars går raderna inte att para
+  const refParts = reference ? reference.innerHTML.split(LINE_SEPARATOR) : null;
+  const refRows = refParts && refParts.length === parts.length
+    ? refParts.map((part, index) => (index % 2 ? null : parseLabelRow(part)))
+    : null;
 
   // Block = rader i följd som alla är spaltrader. Allt annat bryter blocket,
   // även en tom rad – två listor med en blankrad emellan radas upp var för sig.
@@ -141,8 +163,15 @@ export async function alignColumns(editor) {
 
   for (const block of blocks) {
     block.forEach(row => { row.width = widthOf(row); });
-    // Första stoppet som ligger förbi den bredaste etiketten
-    let target = nextStop(Math.max(...block.map(r => r.width)));
+
+    const fromReference = refRows
+      ? block.map(r => refRows[r.index]).filter(Boolean).map(valueStart)
+      : [];
+    const wanted = fromReference.length
+      ? Math.max(...fromReference)                   // där originalet har kolumnen
+      : Math.max(...block.map(valueStart));          // raden som står längst ut
+    // Aldrig närmare än att den bredaste etiketten får plats före kolumnen
+    let target = Math.max(onStop(wanted), nextStop(Math.max(...block.map(r => r.width))));
     // Varje rad måste också kännas igen som spaltrad i PDF:en, vilket kräver
     // att värdet börjar tillräckligt långt in även räknat i tecken
     for (let guard = 0; guard < 20; guard++) {
@@ -168,10 +197,13 @@ export async function alignColumns(editor) {
  * HTML för ett formaterat fält. Ger samma formulärvärde som en <textarea>.
  * @param {string} name   fältnamnet i formuläret
  * @param {string} value  sparat värde (HTML, eller ren text från äldre poster)
- * @param {object} opts   { rows }
+ * @param {object} opts   { rows, alignWith }
+ *   alignWith – namnet på fältet som är förlaga till det här (originalet till en
+ *   översättning). Knappen "Rada upp kolumner" lägger då värdena där de står i
+ *   förlagan i stället för att gissa kolumnen.
  */
 export function richTextField(name, value, opts = {}) {
-  const { rows = 6 } = opts;
+  const { rows = 6, alignWith = '' } = opts;
   // Ett gammalt värde utan våra taggar är ren text och måste escapas innan det
   // läggs in i en contenteditable. Testet gäller taggarna redigeraren själv
   // skapar – ett ensamt "<" i löpande text ("5 < 6") är inte markup.
@@ -180,7 +212,7 @@ export function richTextField(name, value, opts = {}) {
     : esc(value).replace(/\n/g, '<br>');
 
   return `
-    <div class="richtext" data-rich-for="${esc(name)}">
+    <div class="richtext" data-rich-for="${esc(name)}"${alignWith ? ` data-align-with="${esc(alignWith)}"` : ''}>
       <div class="richtext-toolbar">
         ${BUTTONS.map(b => `
           <button type="button" class="richtext-btn" data-cmd="${b.cmd}"
@@ -253,9 +285,15 @@ export function bindRichText(root) {
       btn.addEventListener('mousedown', async (e) => {
         e.preventDefault();
         if (btn.dataset.cmd === 'alignColumns') {
+          const refName = wrap.dataset.alignWith;
+          const reference = refName
+            ? document.querySelector(`[data-rich-for="${refName}"] .richtext-input`)
+            : null;
           // Räknas som en ändring av användaren – input-händelsen gör att
           // formuläret vet att det finns något osparat
-          if (await alignColumns(editor)) editor.dispatchEvent(new Event('input', { bubbles: true }));
+          if (await alignColumns(editor, { reference })) {
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
+          }
           return;
         }
         editor.focus();

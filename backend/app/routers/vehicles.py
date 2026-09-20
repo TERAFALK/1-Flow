@@ -110,19 +110,6 @@ def delete_vehicle(
 
 # ── Svängradie ────────────────────────────────────────────────────────────────
 
-def _turning_for(vehicle: models.Vehicle, angle: Optional[float]) -> turning.TurningResult:
-    dims = turning.dims_from_vehicle(vehicle)
-    if dims is None:
-        raise HTTPException(
-            400, "Fordonet saknar hjulbas och/eller bredd – fyll i måtten för att beräkna svängradie"
-        )
-    steer = angle or vehicle.max_steering_angle or 20.0
-    try:
-        return turning.compute(dims, steer)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
 def _turning_dims(vehicle: models.Vehicle) -> turning.TruckDims:
     dims = turning.dims_from_vehicle(vehicle)
     if dims is None:
@@ -139,6 +126,21 @@ def _eu_check(vehicle: models.Vehicle):
     return turning.check_eu(_turning_dims(vehicle), max_angle), assumed
 
 
+def _turning_case(vehicle: models.Vehicle, angle: Optional[float]):
+    """Provfallet som både förhandsgranskningen och PDF:en ritar.
+
+    Utan explicit ``angle`` används provläget: styrvinkeln där yttersta punkten
+    löper längs 12,50 m-cirkeln. Därmed visar webbvyn exakt samma bild som PDF:en."""
+    dims = _turning_dims(vehicle)
+    comp, assumed = _eu_check(vehicle)
+    draw_angle = angle or comp.angle or comp.max_steering_angle
+    try:
+        res = turning.compute(dims, draw_angle)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return dims, comp, assumed, res
+
+
 @router.get("/{vehicle_id}/turning")
 def get_turning(
     vehicle_id: int,
@@ -148,10 +150,13 @@ def get_turning(
 ):
     """Returnerar radier + konturpunkter (mm, vändcentrum i origo, y uppåt)."""
     vehicle = _load_vehicle(db, vehicle_id)
-    out = _turning_for(vehicle, angle).to_dict()
-    comp, assumed = _eu_check(vehicle)
+    _dims, comp, assumed, res = _turning_case(vehicle, angle)
+    out = res.to_dict()
     out["compliance"] = comp.to_dict()
     out["max_steering_assumed"] = assumed
+    # Kravcirklarna skickas med så att webbritningen använder samma underlag som PDF:en
+    out["ref_outer"] = turning.reference_arc(turning.EU_OUTER_RADIUS)
+    out["ref_inner"] = turning.reference_arc(turning.EU_INNER_RADIUS)
     return out
 
 
@@ -435,14 +440,7 @@ def turning_pdf(
     _: models.User = Depends(get_current_user),
 ):
     vehicle = _load_vehicle(db, vehicle_id)
-    dims = _turning_dims(vehicle)
-    comp, assumed = _eu_check(vehicle)
-    # Ritas i provläget: styrvinkeln där yttersta punkten går i 12,50 m-cirkeln.
-    draw_angle = angle or comp.angle or comp.max_steering_angle
-    try:
-        res = turning.compute(dims, draw_angle)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    _dims, comp, assumed, res = _turning_case(vehicle, angle)
 
     buf = io.BytesIO()
     page_w, page_h = landscape(A4)

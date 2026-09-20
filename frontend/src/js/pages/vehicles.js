@@ -165,8 +165,8 @@ export async function renderVehicleDetail(el, id) {
         <div class="card-header">
           <span class="card-title">Svängradie</span>
           <div style="display:flex;gap:8px;align-items:center">
-            <label style="font-size:12px;color:var(--text-3)">Styrvinkel</label>
-            <input type="number" id="turn-angle" value="${v.max_steering_angle || 20}" step="0.5" min="1" max="89" style="width:70px">
+            <label style="font-size:12px;color:var(--text-3)" title="Styrvinkeln i manöverprovet – sätts automatiskt så att yttersta punkten går i 12,50 m-cirkeln">Styrvinkel (provläge)</label>
+            <input type="number" id="turn-angle" step="0.5" min="1" max="89" style="width:70px">
             <span style="font-size:12px;color:var(--text-3)">°</span>
             <button class="btn btn-ghost btn-sm" id="turn-pdf-btn">
               <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM9.293 13.707a1 1 0 001.414 0l4-4a1 1 0 00-1.414-1.414L11 10.586V3a1 1 0 10-2 0v7.586L6.707 8.293a1 1 0 00-1.414 1.414l4 4z" clip-rule="evenodd"/></svg>
@@ -400,18 +400,26 @@ function euVerdict(res) {
 function loadTurning(v) {
   const body = document.getElementById('turn-body');
   const angleInput = document.getElementById('turn-angle');
+  // null = provläget (styrvinkeln där yttersta punkten går i 12,50 m-cirkeln).
+  // Då visar förhandsgranskningen exakt samma fall som PDF:en.
+  let overrideAngle = null;
+
+  function query() {
+    return overrideAngle ? `?angle=${overrideAngle}` : '';
+  }
 
   async function render() {
-    const angle = parseFloat(angleInput.value) || 20;
     body.innerHTML = '<div class="loading">Beräknar…</div>';
     let res;
     try {
-      res = await api.get(`/vehicles/${v.id}/turning?angle=${angle}`);
+      res = await api.get(`/vehicles/${v.id}/turning${query()}`);
     } catch (err) {
       body.innerHTML = `<div class="alert alert-warning" style="margin:0">${err.message}</div>
         <div class="text-muted" style="font-size:12px;margin-top:8px">Fyll i hjulbas och bredd under Redigera för att beräkna svängradie.</div>`;
       return;
     }
+    // Spegla tillbaka provlägets vinkel så fältet visar vad som faktiskt ritats
+    angleInput.value = Number(res.steering_angle).toFixed(2).replace(/\.?0+$/, '');
     body.innerHTML = `
       ${euVerdict(res)}
       <div style="display:grid;grid-template-columns:200px 1fr;gap:20px;align-items:start">
@@ -419,24 +427,34 @@ function loadTurning(v) {
           ${turnStat('Ytterradie R ut', res.r_out, 'var(--accent)')}
           ${turnStat('Innerradie R in', res.r_in, '#12a150')}
           ${turnStat('Framaxel R fram', res.r_front)}
-          ${turnStat('Svepbredd', res.swept_width)}
-          ${turnStat('Styrvinkel fram', res.steering_angle, null, '°', 1)}
+          ${turnStat('Utsvängning', res.swept_width)}
+          ${turnStat('Styrvinkel fram', res.steering_angle, null, '°', 2)}
           ${(res.axle_angles || []).filter((a, i) => a.steered && i > 0).map((a) =>
             turnStat(`Styrvinkel axel ${res.axle_angles.indexOf(a) + 1}`, a.angle, '#e5484d', '°', 1)).join('')}
+          ${overrideAngle ? `<button class="btn btn-ghost btn-sm" id="turn-reset">↺ Tillbaka till provläget</button>` : ''}
         </div>
         <div style="min-width:0;overflow-x:auto">${turningSvg(res)}</div>
       </div>`;
+    document.getElementById('turn-reset')?.addEventListener('click', () => {
+      overrideAngle = null;
+      render();
+    });
   }
 
-  angleInput.addEventListener('change', render);
+  angleInput.addEventListener('change', () => {
+    const a = parseFloat(angleInput.value);
+    overrideAngle = (a > 0 && a < 90) ? a : null;
+    render();
+  });
   document.getElementById('turn-pdf-btn').addEventListener('click', async () => {
-    const angle = parseFloat(angleInput.value) || 20;
     try {
-      await downloadFile(`/vehicles/${v.id}/turning/pdf?angle=${angle}`, `svangradie-${v.license_plate}.pdf`);
+      await downloadFile(`/vehicles/${v.id}/turning/pdf${query()}`,
+                         `svangradie-${v.license_plate}.pdf`);
     } catch (err) { showToast(err.message, 'error'); }
   });
   render();
 }
+
 
 function turnStat(label, value, color, unit = 'mm', dec = 0) {
   const u = unit.trim();
@@ -450,9 +468,15 @@ function turnStat(label, value, color, unit = 'mm', dec = 0) {
 }
 
 function turningSvg(res) {
-  // Passa in alla punkter (mm, y uppåt) i en fast viewBox och flippa y.
-  const W = 640, H = 380, pad = 12;
-  const all = [...res.arc_in, ...res.arc_out, ...res.body, ...res.ghost, res.center];
+  // Samma bild som PDF:ens sida 1: kravcirklar, tillåten korridor, fordonets
+  // svepyta och måttsatt utsvängning. Punkter i mm, vändcentrum i origo, y uppåt.
+  const W = 660, H = 420, pad = 14;
+  const OUTER = 12500, INNER = 5300, DIM_DEG = 15;
+  const at = (r, deg) => [r * Math.cos(deg * Math.PI / 180), r * Math.sin(deg * Math.PI / 180)];
+  const refOut = res.ref_outer || [], refIn = res.ref_inner || [];
+
+  const all = [...res.arc_in, ...res.arc_out, ...res.body, ...refOut, ...refIn,
+               at(OUTER * 1.04, 62), at(OUTER, DIM_DEG), res.center];
   const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -460,19 +484,40 @@ function turningSvg(res) {
   const ox = (W - (maxX - minX) * s) / 2, oy = (H - (maxY - minY) * s) / 2;
   const T = p => [ox + (p[0] - minX) * s, H - (oy + (p[1] - minY) * s)];
   const pts = arr => arr.map(p => T(p).map(n => n.toFixed(1)).join(',')).join(' ');
-  const band = [...res.arc_out, ...res.arc_in.slice().reverse()];
   const cen = T(res.center);
+  const mm = x => Math.round(x).toLocaleString('sv-SE') + ' mm';
+
+  // Utsvängningsmåttet längs en stråle, som i PDF:en
+  const pIn = T(at(res.r_in, DIM_DEG)), pOut = T(at(res.r_out, DIM_DEG));
+  const ux = Math.cos(DIM_DEG * Math.PI / 180), uy = Math.sin(DIM_DEG * Math.PI / 180);
+  const tx = -uy * 5, ty = -ux * 5;   // vinkelrätt, y-axeln är flippad i SVG
+  const tick = p => `<line x1="${p[0] - tx}" y1="${p[1] - ty}" x2="${p[0] + tx}" y2="${p[1] + ty}" stroke="#e5484d" stroke-width="1.6"/>`;
+
+  const label = (r, deg, text, fill) => {
+    const p = T(at(r, deg));
+    return `<text x="${p[0] + 4}" y="${p[1] - 3}" font-size="10" font-weight="700" fill="${fill}">${text}</text>`;
+  };
   const wheels = (res.wheels || []).map(w => `<polygon points="${pts(w)}" fill="#374151"/>`).join('');
+
   return `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:auto" font-family="inherit">
-      <polygon points="${pts(band)}" fill="var(--accent)" opacity="0.10"/>
-      <polyline points="${pts(res.arc_out)}" fill="none" stroke="var(--accent)" stroke-width="2"/>
-      <polyline points="${pts(res.arc_in)}" fill="none" stroke="#12a150" stroke-width="2"/>
-      <polygon points="${pts(res.ghost)}" fill="none" stroke="#9aa6b2" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.8"/>
+      ${refOut.length ? `<polygon points="${pts([...refOut, ...refIn.slice().reverse()])}" fill="#12a150" opacity="0.10"/>` : ''}
+      <polygon points="${pts([...res.arc_out, ...res.arc_in.slice().reverse()])}" fill="var(--accent)" opacity="0.22"/>
+      ${refOut.length ? `<polyline points="${pts(refOut)}" fill="none" stroke="#12a150" stroke-width="2"/>` : ''}
+      ${refIn.length ? `<polyline points="${pts(refIn)}" fill="none" stroke="#12a150" stroke-width="2"/>` : ''}
+      <polyline points="${pts(res.arc_out)}" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="5 3"/>
+      <polyline points="${pts(res.arc_in)}" fill="none" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="5 3"/>
       ${wheels}
-      <polygon points="${pts(res.body)}" fill="var(--accent)" fill-opacity="0.08" stroke="var(--accent)" stroke-width="2"/>
-      <polygon points="${pts(res.cab)}" fill="var(--accent)" opacity="0.28" stroke="var(--accent)" stroke-width="1"/>
-      <circle cx="${cen[0]}" cy="${cen[1]}" r="4" fill="#e5484d"/>
+      <polygon points="${pts(res.body)}" fill="var(--accent)" fill-opacity="0.10" stroke="var(--accent)" stroke-width="2"/>
+      <polygon points="${pts(res.cab)}" fill="var(--accent)" opacity="0.30" stroke="var(--accent)" stroke-width="1"/>
+      <circle cx="${cen[0]}" cy="${cen[1]}" r="3.5" fill="#e5484d"/>
+      <line x1="${cen[0]}" y1="${cen[1]}" x2="${pOut[0]}" y2="${pOut[1]}" stroke="#e5484d" stroke-width="0.8" stroke-dasharray="2 2"/>
+      <line x1="${pIn[0]}" y1="${pIn[1]}" x2="${pOut[0]}" y2="${pOut[1]}" stroke="#e5484d" stroke-width="1.6"/>
+      ${tick(pIn)}${tick(pOut)}
+      <text x="${(pIn[0] + pOut[0]) / 2 + 7}" y="${(pIn[1] + pOut[1]) / 2 + 13}" font-size="10" font-weight="700" fill="#e5484d">Utsvängning ${mm(res.swept_width)}</text>
+      ${refOut.length ? label(OUTER, 62, 'KRAV  R 12,50 m', '#0f7a3d') : ''}
+      ${refIn.length ? label(INNER, 70, 'KRAV  R 5,30 m', '#0f7a3d') : ''}
+      ${label(res.r_in, 86, `R in ${mm(res.r_in)}`, 'var(--accent)')}
     </svg>`;
 }
 

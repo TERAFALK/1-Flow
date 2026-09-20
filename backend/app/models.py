@@ -405,6 +405,12 @@ class PickList(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
     notes = Column(Text)
+    # "plocklista" = adminens plock från lagret, "skanning" = teknikerns tillfälliga
+    # lista från skannersidan. Vanlig String och inte Enum: en Postgres-enum kräver
+    # ALTER TYPE-migrering för varje ny medlem (se kommentaren på SalesLeadKind).
+    kind = Column(String, default="plocklista", nullable=False, index=True)
+    # NULL = öppen. En avslutad skanning ligger kvar men göms i skannerns lista.
+    closed_at = Column(DateTime)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 

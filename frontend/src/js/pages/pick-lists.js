@@ -4,6 +4,11 @@ import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 
 export async function renderPickLists(el) {
+  // Teknikernas skanningar ligger i samma tabell som adminens plocklistor och
+  // skiljs åt på kind. Utan den här flikväxlingen blandas de i en enda lista.
+  let kind = 'plocklista';
+  let includeClosed = false;
+
   el.innerHTML = `
     <div class="page-header">
       <div>
@@ -15,31 +20,65 @@ export async function renderPickLists(el) {
         Ny plocklista
       </button>
     </div>
+    <div class="tabs">
+      <div class="tab active" data-kind="plocklista">Plocklistor</div>
+      <div class="tab" data-kind="skanning">Skanningar från verkstaden</div>
+    </div>
     <div class="card">
+      <div class="card-header">
+        <span class="card-title" id="picklist-heading">Plocklistor</span>
+        <button class="btn btn-ghost btn-sm" id="toggle-closed-btn">Visa avslutade</button>
+      </div>
       <div id="picklist-content"><div class="loading">Laddar…</div></div>
     </div>
   `;
 
   document.getElementById('new-picklist-btn').addEventListener('click', () => openPickListBuilder(reload));
 
+  document.querySelectorAll('.tabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      if (kind === tab.dataset.kind) return;
+      kind = tab.dataset.kind;
+      document.querySelectorAll('.tabs .tab').forEach(t => t.classList.toggle('active', t === tab));
+      document.getElementById('picklist-heading').textContent =
+        kind === 'skanning' ? 'Skanningar från verkstaden' : 'Plocklistor';
+      // Ny plocklista hör bara hemma i adminens egen flik
+      document.getElementById('new-picklist-btn').classList.toggle('hidden', kind === 'skanning');
+      reload();
+    });
+  });
+
+  document.getElementById('toggle-closed-btn').addEventListener('click', () => {
+    includeClosed = !includeClosed;
+    document.getElementById('toggle-closed-btn').textContent =
+      includeClosed ? 'Visa bara öppna' : 'Visa avslutade';
+    reload();
+  });
+
   async function reload() {
     const wrap = document.getElementById('picklist-content');
     if (!wrap) return;
-    const lists = await api.get('/pick-lists');
+    const lists = await api.get(`/pick-lists?kind=${kind}${includeClosed ? '&include_closed=true' : ''}`);
     if (!lists.length) {
-      wrap.innerHTML = `<div class="empty-state"><p>Inga plocklistor ännu</p></div>`;
+      wrap.innerHTML = `<div class="empty-state"><p>${
+        kind === 'skanning' ? 'Inga skanningar ännu' : 'Inga plocklistor ännu'
+      }</p></div>`;
       return;
     }
     wrap.innerHTML = `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Titel</th><th>Anteckning</th><th class="text-right">Rader</th><th>Skapad</th><th></th></tr></thead>
+          <thead><tr><th>Titel</th><th>Anteckning</th><th class="text-right">Rader</th><th>Skapad av</th><th>Skapad</th><th></th></tr></thead>
           <tbody>
             ${lists.map(p => `
               <tr>
-                <td><strong>${p.title}</strong></td>
+                <td>
+                  <strong>${p.title}</strong>
+                  ${p.closed_at ? '<span class="badge badge-fakturerad" style="margin-left:6px">Avslutad</span>' : ''}
+                </td>
                 <td class="text-muted">${p.notes || '–'}</td>
                 <td class="text-right">${p.line_count}</td>
+                <td class="text-muted">${p.created_by_name || '–'}</td>
                 <td class="text-muted">${fmtDate(p.created_at, true)}</td>
                 <td>
                   <div class="flex gap-2">
@@ -97,7 +136,9 @@ async function openPickListBuilder(onSaved, existingId = null) {
   }
 
   openModal({
-    title: existing ? `Redigera plocklista – ${existing.title}` : 'Ny plocklista',
+    title: existing
+      ? `Redigera ${existing.kind === 'skanning' ? 'skanning' : 'plocklista'} – ${existing.title}`
+      : 'Ny plocklista',
     size: 'modal-lg',
     body: `
       <form id="picklist-form">
@@ -211,7 +252,7 @@ async function openPickListBuilder(onSaved, existingId = null) {
         await Promise.all(lines.map(l => api.post(`/pick-lists/${existing.id}/lines`, l)));
         showToast('Plocklista uppdaterad', 'success');
       } else {
-        await api.post('/pick-lists', { title, notes: notes || null, lines });
+        await api.post('/pick-lists', { title, notes: notes || null, kind: 'plocklista', lines });
         showToast('Plocklista skapad', 'success');
       }
       closeModal();

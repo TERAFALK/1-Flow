@@ -26,8 +26,13 @@ _TEKNIKER_ALLOWLIST: tuple[tuple[str, re.Pattern], ...] = (
     # antalet – teknikern får inte skriva om beskrivning eller pris.
     ("PUT",  re.compile(r"^/api/work-orders/\d+/lines/\d+/quantity$")),
     ("POST", re.compile(r"^/api/pick-lists$")),
+    # Öppna skanningar, så en påbörjad lista går att ta upp igen. Routern tvingar
+    # kind=skanning för teknikerkonton – allowlisten styr vägar, aldrig rader.
+    ("GET",  re.compile(r"^/api/pick-lists$")),
     ("GET",  re.compile(r"^/api/pick-lists/\d+$")),
-    ("PUT",  re.compile(r"^/api/pick-lists/\d+$")),   # döpa om en tillfällig lista
+    ("PUT",  re.compile(r"^/api/pick-lists/\d+$")),   # döpa om / avsluta / återöppna
+    # Kasta en skanning som blev fel redan från start. Samma kind-spärr i routern.
+    ("DELETE", re.compile(r"^/api/pick-lists/\d+$")),
     ("POST", re.compile(r"^/api/pick-lists/\d+/scan$")),
     ("PUT",  re.compile(r"^/api/pick-lists/\d+/lines/\d+/quantity$")),
     ("GET",  re.compile(r"^/api/pick-lists/\d+/pdf$")),

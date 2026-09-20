@@ -714,16 +714,22 @@ tr.row-done td:nth-child(3) { text-decoration: line-through; }
 .order-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* ── Scanner ─────────────────────────────────────────────────────────────────── */
-.scanner-panel {
+/* Skannersidan är en centrerad stapel: skanningen överst, de skannade raderna
+   i full bredd under. Tidigare låg raderna i en fast 340 px-kolumn längst till
+   vänster medan kodfältet åt upp resten av skärmen. */
+.scanner-page { max-width: 1080px; margin: 0 auto; }
+
+.scan-hero {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  margin-bottom: 20px;
 }
-.scanner-header {
+.scan-hero-top {
   background: var(--accent);
-  padding: 16px 22px;
+  padding: 14px 22px;
   color: white;
   display: flex;
   align-items: center;
@@ -731,18 +737,63 @@ tr.row-done td:nth-child(3) { text-decoration: line-through; }
   font-size: 14px;
   font-weight: 700;
 }
-.scanner-header svg { opacity: .85; }
+.scan-hero-top svg { opacity: .85; flex-shrink: 0; }
+.scan-hero-body { padding: 20px 22px 22px; }
 
-.scanner-active-indicator {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 700;
+.scan-sound-btn {
   margin-left: auto;
+  background: rgba(255,255,255,.14);
+  border: none; color: white;
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
 }
-.scanner-active-indicator span {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: white;
-  animation: pulse 1.2s ease infinite;
+.scan-sound-btn:hover { background: rgba(255,255,255,.26); }
+
+/* Läget växlas med flikarna i .tabs, men utan marginalen under – de sitter
+   direkt ovanför målraden i samma kort. */
+.scan-mode-tabs { margin-bottom: 18px; }
+
+.scan-target-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
 }
+.scan-target-row .field { margin-bottom: 0; }
+.scan-target-actions { display: flex; gap: 8px; }
+
+.scan-active-list {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 18px;
+}
+.scan-active-list strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Statusraden ersätter den gamla "Starta skanning"-knappen: skanningen är alltid
+   på, pillret säger bara om tangenterna fångas just nu eller inte. */
+.scan-status {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text-2);
+}
+.scan-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.scan-status.is-ready { color: var(--success); }
+.scan-status.is-ready .scan-status-dot { background: var(--success); animation: pulse 1.2s ease infinite; }
+.scan-status.is-paused { color: var(--warning); }
+.scan-status.is-paused .scan-status-dot { background: var(--warning); }
+
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.4; transform: scale(0.75); }
@@ -768,6 +819,27 @@ tr.row-done td:nth-child(3) { text-decoration: line-through; }
 }
 .scan-input::placeholder { letter-spacing: 1px; font-weight: 400; color: var(--text-3); font-size: 14px; }
 .scan-input[readonly] { opacity: 0.55; cursor: not-allowed; }
+
+/* Skannade artiklar – full bredd, och rader stora nog för handskar */
+.scan-lines-table th { font-size: 11px; }
+.scan-lines-table td { padding: 12px 14px; font-size: 14px; }
+.scan-lines-table .scan-line-name { font-weight: 600; }
+
+.scan-resume-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-light);
+}
+.scan-resume-row:last-child { border-bottom: none; }
+.scan-resume-main { flex: 1; min-width: 0; }
+.scan-resume-title { font-weight: 600; overflow-wrap: anywhere; }
+.scan-resume-meta { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+@media (max-width: 900px) {
+  .scan-target-row { grid-template-columns: 1fr; align-items: stretch; }
+  .scan-target-actions .btn { flex: 1; }
+  .scan-resume-row { flex-wrap: wrap; }
+}
 
 .scan-feedback {
   padding: 11px 14px;

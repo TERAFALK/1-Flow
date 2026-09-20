@@ -144,6 +144,14 @@ def _run_migrations():
             location VARCHAR,
             picked BOOLEAN DEFAULT FALSE
         )""",
+        # Skanning eller plocklista, och öppen eller avslutad
+        "ALTER TABLE pick_lists ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'plocklista'",
+        "ALTER TABLE pick_lists ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP",
+        "CREATE INDEX IF NOT EXISTS ix_pick_lists_kind ON pick_lists (kind)",
+        # Skanningar som redan finns ska hitta tillbaka till skannersidan. De skapades
+        # alla med titelprefixet från scanner.js och går att känna igen på det.
+        """UPDATE pick_lists SET kind = 'skanning'
+           WHERE kind = 'plocklista' AND title LIKE 'Tillfällig skanning%'""",
         # Artikelnummer på raderna – överlever tömning/ominläsning av artikelregistret
         "ALTER TABLE work_order_lines ADD COLUMN IF NOT EXISTS article_number VARCHAR",
         "ALTER TABLE pick_list_lines ADD COLUMN IF NOT EXISTS article_number VARCHAR",

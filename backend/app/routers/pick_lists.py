@@ -1,4 +1,5 @@
 import io
+from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Body
@@ -16,15 +17,21 @@ from ..schemas import (
     PickListLineCreate, PickListLineUpdate, PickListLineOut, PickListScanResult,
     LineQuantityUpdate,
 )
-from ..models import PickList, PickListLine, Article, User
+from ..models import PickList, PickListLine, Article, User, UserRole
 from ..pdf_utils import draw_header
 
 router = APIRouter(prefix="/api/pick-lists", tags=["pick-lists"])
 
+# Teknikerns tillfälliga skanningar. Adminens egna plock har kind "plocklista".
+SCAN_KIND = "skanning"
+
 
 def _out(pl: PickList) -> PickListOut:
     return PickListOut(
-        id=pl.id, title=pl.title, notes=pl.notes, created_at=pl.created_at,
+        id=pl.id, title=pl.title, notes=pl.notes, kind=pl.kind,
+        created_at=pl.created_at, closed_at=pl.closed_at,
+        created_by=pl.created_by,
+        created_by_name=pl.creator.full_name if pl.creator else None,
         lines=[PickListLineOut.from_line(l) for l in pl.lines],
     )
 
@@ -50,18 +57,62 @@ def _get(db: Session, pick_list_id: int) -> PickList:
     return pl
 
 
+def _get_for_user(db: Session, pick_list_id: int, user: User) -> PickList:
+    """Som ``_get``, men släpper bara fram teknikern till skanningarna.
+
+    Allowlisten i deps.py styr vilka *vägar* en tekniker når, aldrig vilka rader.
+    Utan den här kontrollen kan en teknikertoken öppna, döpa om och skanna in i
+    vilken av adminens plocklistor som helst genom att gissa ett id.
+    """
+    pl = _get(db, pick_list_id)
+    if user.role == UserRole.tekniker and pl.kind != SCAN_KIND:
+        raise HTTPException(status_code=403, detail="Åtkomst nekad för teknikerkonto")
+    return pl
+
+
 @router.get("", response_model=List[PickListListItem])
-def list_pick_lists(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    lists = db.query(PickList).options(joinedload(PickList.lines)).order_by(PickList.created_at.desc()).all()
+def list_pick_lists(
+    kind: Optional[str] = None,
+    include_closed: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Listar plocklistor och skanningar. Öppna först, därefter senast skapad.
+
+    En tekniker får bara skanningar oavsett vad som efterfrågas – det är den
+    regeln som gör att listningen kan vara öppen för teknikerkonton utan att
+    adminens plocklistor läcker ut i skannern.
+    """
+    if current_user.role == UserRole.tekniker:
+        kind = SCAN_KIND
+
+    q = db.query(PickList).options(joinedload(PickList.lines), joinedload(PickList.creator))
+    if kind:
+        q = q.filter(PickList.kind == kind)
+    if not include_closed:
+        q = q.filter(PickList.closed_at.is_(None))
+    lists = q.order_by(
+        PickList.closed_at.is_(None).desc(), PickList.created_at.desc()
+    ).all()
     return [
-        PickListListItem(id=p.id, title=p.title, notes=p.notes, created_at=p.created_at, line_count=len(p.lines))
+        PickListListItem(
+            id=p.id, title=p.title, notes=p.notes, kind=p.kind,
+            created_at=p.created_at, closed_at=p.closed_at,
+            created_by=p.created_by,
+            created_by_name=p.creator.full_name if p.creator else None,
+            line_count=len(p.lines),
+        )
         for p in lists
     ]
 
 
 @router.post("", response_model=PickListOut, status_code=status.HTTP_201_CREATED)
 def create_pick_list(body: PickListCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    pl = PickList(title=body.title, notes=body.notes, created_by=current_user.id)
+    kind = body.kind if body.kind in ("plocklista", SCAN_KIND) else "plocklista"
+    # En tekniker skapar bara skanningar, aldrig en plocklista i adminens vy
+    if current_user.role == UserRole.tekniker:
+        kind = SCAN_KIND
+    pl = PickList(title=body.title, notes=body.notes, kind=kind, created_by=current_user.id)
     db.add(pl)
     db.flush()
     for line in body.lines:
@@ -71,24 +122,28 @@ def create_pick_list(body: PickListCreate, db: Session = Depends(get_db), curren
 
 
 @router.get("/{pick_list_id}", response_model=PickListOut)
-def get_pick_list(pick_list_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return _out(_get(db, pick_list_id))
+def get_pick_list(pick_list_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return _out(_get_for_user(db, pick_list_id, current_user))
 
 
 @router.put("/{pick_list_id}", response_model=PickListOut)
-def update_pick_list(pick_list_id: int, body: PickListUpdate, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    pl = _get(db, pick_list_id)
-    for field, value in body.model_dump(exclude_unset=True).items():
+def update_pick_list(pick_list_id: int, body: PickListUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pl = _get_for_user(db, pick_list_id, current_user)
+    data = body.model_dump(exclude_unset=True)
+    # closed är ett ja/nej utåt men en tidsstämpel i databasen, så den måste
+    # plockas ur innan resten sätts rakt av
+    if "closed" in data:
+        closed = data.pop("closed")
+        pl.closed_at = datetime.utcnow() if closed else None
+    for field, value in data.items():
         setattr(pl, field, value)
     db.commit()
     return _out(_get(db, pick_list_id))
 
 
 @router.delete("/{pick_list_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_pick_list(pick_list_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    pl = db.get(PickList, pick_list_id)
-    if not pl:
-        raise HTTPException(status_code=404, detail="Plocklista ej hittad")
+def delete_pick_list(pick_list_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pl = _get_for_user(db, pick_list_id, current_user)
     db.delete(pl)
     db.commit()
 
@@ -132,7 +187,7 @@ def set_scanned_quantity(
     line_id: int,
     body: LineQuantityUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Rättar antalet på en skannad rad. 0 tar bort raden.
 
@@ -142,6 +197,7 @@ def set_scanned_quantity(
     """
     if body.quantity < 0:
         raise HTTPException(status_code=400, detail="Antalet kan inte vara negativt")
+    _get_for_user(db, pick_list_id, current_user)
     line = db.query(PickListLine).filter(
         PickListLine.id == line_id, PickListLine.pick_list_id == pick_list_id
     ).first()
@@ -164,10 +220,11 @@ def scan_into_pick_list(
     pick_list_id: int,
     barcode: str = Body(..., embed=True),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    if not db.get(PickList, pick_list_id):
-        raise HTTPException(status_code=404, detail="Plocklista ej hittad")
+    pl = _get_for_user(db, pick_list_id, current_user)
+    if pl.closed_at:
+        raise HTTPException(status_code=400, detail="Skanningen är avslutad – öppna den igen först")
 
     article = db.query(Article).filter(
         (Article.barcode == barcode) | (Article.article_number == barcode)
@@ -223,15 +280,17 @@ def scan_into_pick_list(
 
 
 @router.get("/{pick_list_id}/pdf")
-def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    pl = _get(db, pick_list_id)
+def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pl = _get_for_user(db, pick_list_id, current_user)
+    # Samma PDF för båda sorterna, men rubriken ska stämma med vad man skrev ut
+    heading = "Skanning" if pl.kind == SCAN_KIND else "Plocklista"
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     page_w, page_h = A4
     margin = 18 * mm
 
-    y = draw_header(c, page_w, "Plocklista", pl.title)
+    y = draw_header(c, page_w, heading, pl.title)
     c.setFont("Helvetica", 9)
     c.setFillColor(colors.HexColor("#666666"))
     c.drawString(margin, y, f"Skapad: {pl.created_at.strftime('%Y-%m-%d %H:%M')}")
@@ -274,7 +333,7 @@ def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = De
     for line in pl.lines:
         if y < 25 * mm:
             c.showPage()
-            y = draw_header(c, page_w, "Plocklista", pl.title)
+            y = draw_header(c, page_w, heading, pl.title)
             y -= 10
             y = header_row(y)
             c.setFont("Helvetica", 8.5)
@@ -296,7 +355,7 @@ def pick_list_pdf(pick_list_id: int, db: Session = Depends(get_db), _: User = De
 
     c.save()
     buf.seek(0)
-    filename = f"plocklista-{pl.id}.pdf"
+    filename = f"{heading.lower()}-{pl.id}.pdf"
     return StreamingResponse(
         buf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},

@@ -724,12 +724,17 @@ class PickListLineOut(BaseModel):
 class PickListCreate(BaseModel):
     title: str
     notes: Optional[str] = None
+    # "plocklista" (adminens plock) eller "skanning" (teknikerns tillfälliga lista)
+    kind: str = "plocklista"
     lines: List[PickListLineCreate] = []
 
 
 class PickListUpdate(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
+    # Avsluta eller återöppna. Översätts till closed_at i routern – här är det ett
+    # ja/nej eftersom klienten aldrig ska behöva skicka en tidsstämpel.
+    closed: Optional[bool] = None
 
 
 class PickListListItem(BaseModel):
@@ -737,7 +742,11 @@ class PickListListItem(BaseModel):
     id: int
     title: str
     notes: Optional[str]
+    kind: str = "plocklista"
     created_at: datetime
+    closed_at: Optional[datetime] = None
+    created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
     line_count: int = 0
 
 
@@ -746,7 +755,11 @@ class PickListOut(BaseModel):
     id: int
     title: str
     notes: Optional[str]
+    kind: str = "plocklista"
     created_at: datetime
+    closed_at: Optional[datetime] = None
+    created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
     lines: List[PickListLineOut]
 
 

@@ -1,6 +1,7 @@
 import { api, uploadFile, downloadFile } from '../api.js';
 import { openModal, closeModal, confirmDialog } from './modal.js';
 import { showToast } from './toast.js';
+import { dropZone, setInputFiles } from './dropzone.js';
 
 // Uppföljningslogg – används av offertförfrågan, såld order och kundkortet.
 // Anteckningar som ärvs från en annan post (förfrågans logg på ordern, affärens
@@ -42,7 +43,7 @@ export function notesCardHtml(notes, { title = 'Uppföljning' } = {}) {
           <button class="btn btn-primary btn-sm" data-note-kind="anteckning">Anteckning</button>
         </div>
       </div>
-      <div class="card-body" id="notes-body">${notesHtml(notes)}</div>
+      <div class="card-body" id="notes-body" data-notes-drop>${notesHtml(notes)}</div>
     </div>`;
 }
 
@@ -152,6 +153,7 @@ function noteFilesHtml(n) {
           + Bifoga fil
           <input type="file" multiple data-note-upload="${n.id}" style="display:none">
         </label>` : ''}
+      ${canEdit ? '<span class="drop-hint" title="Dra hit filer eller mail från Outlook">Dra hit</span>' : ''}
     </div>`;
 }
 
@@ -204,13 +206,34 @@ export function bindNotes(base, reload, { withFollowup = false, notes = [] } = {
     });
   });
 
-  bindNoteFiles(reload);
+  bindNoteFiles(reload, base);
   bindClamping();
 }
 
 /** Bilagorna går mot /api/notes/{id}/files – samma rutt oavsett om anteckningen
  *  sitter på en kund, en förfrågan eller en order. */
-function bindNoteFiles(reload) {
+function bindNoteFiles(reload, base) {
+  // Släpp på en befintlig anteckning bifogar filen där. Släpp på loggen i övrigt
+  // öppnar en ny mailanteckning med filen redan ifylld – det är så ett mail ur
+  // Outlook brukar vara tänkt: en kontakt som ska loggas.
+  document.querySelectorAll('.crm-entry').forEach(entry => {
+    const canEdit = !!entry.querySelector('[data-note-upload]');
+    if (!canEdit) return;
+    dropZone(entry, async (files) => {
+      await uploadNoteFiles(entry.dataset.entry, files);
+      showToast(files.length > 1 ? `${files.length} filer bifogade` : 'Fil bifogad', 'success');
+      reload();
+    });
+  });
+
+  if (base) {
+    dropZone(document.querySelector('[data-notes-drop]'), (files) => {
+      // Filnamnet på ett mail är ämnesraden – bra utkast till "Vad hände?"
+      const subject = files[0] ? files[0].name.replace(/\.[^.]+$/, '') : '';
+      openNoteForm(base, 'mail', reload, { files, body: subject });
+    });
+  }
+
   document.querySelectorAll('[data-note-upload]').forEach(input => {
     input.addEventListener('change', async () => {
       const chosen = [...(input.files || [])];
@@ -257,7 +280,7 @@ function bindNoteFiles(reload) {
   loadNoteThumbs();
 }
 
-export function openNoteForm(base, kind, onSaved, { withFollowup = false, note = null } = {}) {
+export function openNoteForm(base, kind, onSaved, { withFollowup = false, note = null, files = [], body = '' } = {}) {
   const editing = !!note;
   openModal({
     title: editing ? 'Redigera anteckning' : (NOTE_KINDS[kind] || 'Anteckning'),
@@ -274,10 +297,11 @@ export function openNoteForm(base, kind, onSaved, { withFollowup = false, note =
           <div class="field"><label>Datum</label><input type="date" name="note_date" value="${note ? String(note.note_date).slice(0, 10) : todayISO()}"></div>
           ${withFollowup ? '<div class="field"><label>Nästa uppföljning</label><input type="date" name="next_followup_date"></div>' : ''}
         </div>
-        <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus>${esc(note?.body)}</textarea></div>
-        <div class="field">
+        <div class="field"><label>Vad hände? *</label><textarea name="body" rows="4" required autofocus>${esc(note ? note.body : body)}</textarea></div>
+        <div class="field" id="note-file-field">
           <label>Bifoga filer eller kort</label>
           <input type="file" name="files" multiple>
+          <p class="text-muted" style="font-size:12px;margin:4px 0 0">Går även att dra hit, t.ex. ett mail från Outlook.</p>
         </div>
         <div class="modal-footer" style="padding:0;border:none;margin-top:8px">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Avbryt</button>
@@ -285,6 +309,12 @@ export function openNoteForm(base, kind, onSaved, { withFollowup = false, note =
         </div>
       </form>`,
   });
+
+  const fileInput = document.querySelector('#note-form input[name="files"]');
+  // Filer som släpptes på loggen läggs i rutan, så sparningen nedan tar dem
+  // på samma väg som om de valts med musen
+  if (files.length) setInputFiles(fileInput, files);
+  dropZone(document.getElementById('note-file-field'), (dropped) => setInputFiles(fileInput, dropped));
 
   document.getElementById('note-form').addEventListener('submit', async (e) => {
     e.preventDefault();

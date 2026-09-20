@@ -5,6 +5,7 @@ import { richTextField, bindRichText } from '../components/richtext.js';
 import { showToast } from '../components/toast.js';
 import { renderGantt } from '../components/gantt.js';
 import { makeSearchable } from '../components/combobox.js';
+import { dropZone } from '../components/dropzone.js';
 
 const WO_STATUS_LABELS = {
   ny: 'Ny',
@@ -1022,7 +1023,7 @@ async function openPurchaseForm(orderId, purchase, users, onSaved) {
 // ── Files (documents, photos, drawings) ──────────────────────────────────────
 
 const FILE_ACCEPT = {
-  document: '.pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt',
+  document: '.pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.txt,.msg,.eml',
   photo:    '.jpg,.jpeg,.png,.gif,.webp,.bmp',
   drawing:  '.pdf,.dwg,.dxf,.svg',
 };
@@ -1038,7 +1039,7 @@ async function loadFiles(orderId, fileType) {
   el.innerHTML = `
     <div class="upload-area" id="upload-area-${fileType}" style="margin-bottom:16px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="32" height="32" style="opacity:.4"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-      <p style="margin:8px 0 4px">Dra och släpp filer hit, eller</p>
+      <p style="margin:8px 0 4px">Dra och släpp filer eller mail hit, eller</p>
       <label class="btn btn-secondary btn-sm" style="cursor:pointer">
         Välj fil
         <input type="file" id="file-input-${fileType}" accept="${FILE_ACCEPT[fileType]}" multiple style="display:none">
@@ -1087,13 +1088,9 @@ async function loadFiles(orderId, fileType) {
   const uploadArea = document.getElementById(`upload-area-${fileType}`);
   const fileInput = document.getElementById(`file-input-${fileType}`);
 
-  uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
-  uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
-  uploadArea.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('drag-over');
-    await uploadFiles(orderId, fileType, Array.from(e.dataTransfer.files));
-  });
+  // Hela fliken tar emot släppet, inte bara rutan – den som drar ett mail hit
+  // siktar lika gärna på listan under. Rutan är den som markeras.
+  dropZone(el, (files) => uploadFiles(orderId, fileType, files), { highlight: uploadArea });
   fileInput.addEventListener('change', async () => {
     await uploadFiles(orderId, fileType, Array.from(fileInput.files));
     fileInput.value = '';

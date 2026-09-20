@@ -1259,6 +1259,22 @@ tr.row-done td:nth-child(3) { text-decoration: line-through; }
 .upload-area p { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
 .upload-area small { font-size: 12px; }
 
+/* Släppyta på ett kort eller ett avsnitt. Ramen ritas inåt med outline så att
+   inget hoppar till när den slås på – en border hade ändrat elementets storlek. */
+.drop-target.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -3px;
+  background: var(--accent-light);
+}
+.drop-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.drop-hint svg { width: 12px; height: 12px; opacity: .6; }
+
 /* ── Fullscreen image viewer ─────────────────────────────────────────────────── */
 #img-viewer {
   position: fixed; inset: 0;

@@ -1,6 +1,7 @@
 import { api, uploadFile } from '../api.js';
 import { openModal, closeModal, confirmDialog } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { dropZone } from '../components/dropzone.js';
 
 const PAGE_SIZE = 100;
 
@@ -39,14 +40,22 @@ export async function renderArticles(el) {
   document.getElementById('new-article-btn').addEventListener('click', () => openArticleForm(null, reload));
 
   const importInput = document.getElementById('import-excel-input');
-  document.getElementById('import-excel-btn').addEventListener('click', () => importInput.click());
+  const importBtn = document.getElementById('import-excel-btn');
+  importBtn.addEventListener('click', () => importInput.click());
+  // Släpp filen på knappen i stället för att leta upp den i filväljaren.
+  // Bekräftelsedialogen nedan är kvar – importen byter ut hela lagret.
+  dropZone(importBtn, (files) => importExcel(files[0]));
   importInput.addEventListener('change', async () => {
     const file = importInput.files[0];
+    importInput.value = '';
+    await importExcel(file);
+  });
+
+  async function importExcel(file) {
     if (!file) return;
     const ok = await confirmDialog(`Detta skriver <strong>över hela artikellagret</strong> med innehållet i <strong>${file.name}</strong>. Alla befintliga artiklar tas bort och ersätts.<br><br>Artikelnummer på arbetsorder, plocklistor och inköp behålls och kopplas om automatiskt. Fortsätta?`, 'Importera');
-    importInput.value = '';
     if (!ok) return;
-    const btn = document.getElementById('import-excel-btn');
+    const btn = importBtn;
     btn.disabled = true;
     btn.textContent = 'Importerar…';
     try {
@@ -65,7 +74,7 @@ export async function renderArticles(el) {
       btn.disabled = false;
       btn.textContent = 'Importera Excel';
     }
-  });
+  }
 
   document.getElementById('clear-stock-btn').addEventListener('click', async () => {
     const ok = await confirmDialog('Detta tar bort <strong>alla artiklar</strong> i lagret permanent. Rader på arbetsorder, plocklistor och inköp behåller sitt artikelnummer. Är du säker?');

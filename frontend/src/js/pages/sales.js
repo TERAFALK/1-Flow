@@ -7,6 +7,14 @@ import { makeAllSearchable } from '../components/combobox.js';
 import { notesCardHtml, bindNotes } from '../components/notes.js';
 import { richTextField, bindRichText, alignColumns } from '../components/richtext.js';
 import { tasksCardHtml, bindTasks } from '../components/tasks.js';
+import { dropZone } from '../components/dropzone.js';
+
+/** Liten ledtråd i kortrubriken – annars syns det inte att ytan tar emot släpp. */
+const DROP_HINT = `
+  <span class="drop-hint" title="Dra hit filer eller mail från Outlook">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    Dra hit
+  </span>`;
 
 // ── Gemensamma hjälpare ───────────────────────────────────────────────────────
 
@@ -1128,13 +1136,16 @@ function leadFilesCardHtml(base, files) {
   const photos = files.filter(isImage);
   const docs = files.filter(f => !isImage(f));
   return `
-    <div class="card">
+    <div class="card" id="lead-files-card">
       <div class="card-header">
         <span class="card-title">Filer och kort</span>
-        <label class="btn btn-secondary btn-sm" style="margin:0">
-          + Ladda upp
-          <input type="file" id="lead-file-input" multiple style="display:none">
-        </label>
+        <div class="flex gap-2" style="align-items:center">
+          ${DROP_HINT}
+          <label class="btn btn-secondary btn-sm" style="margin:0">
+            + Ladda upp
+            <input type="file" id="lead-file-input" multiple style="display:none">
+          </label>
+        </div>
       </div>
       <div class="card-body" style="padding-bottom:6px">
         ${photos.length ? `
@@ -1186,8 +1197,7 @@ function loadThumbnails(root) {
 }
 
 function bindLeadFiles(base, files, reload) {
-  document.getElementById('lead-file-input')?.addEventListener('change', async (e) => {
-    const chosen = [...(e.target.files || [])];
+  const upload = async (chosen) => {
     if (!chosen.length) return;
     for (const file of chosen) {
       const fd = new FormData();
@@ -1198,6 +1208,13 @@ function bindLeadFiles(base, files, reload) {
     }
     showToast(chosen.length > 1 ? `${chosen.length} filer uppladdade` : 'Fil uppladdad', 'success');
     reload();
+  };
+
+  // Släpp var som helst på kortet – filer, kort och mail ur Outlook
+  dropZone(document.getElementById('lead-files-card'), upload);
+
+  document.getElementById('lead-file-input')?.addEventListener('change', async (e) => {
+    await upload([...(e.target.files || [])]);
   });
 
   document.querySelectorAll('[data-dl-file]').forEach(btn => {
@@ -1453,9 +1470,11 @@ export async function renderSalesOrderDetail(el, id) {
 /** Ett vanligt avsnittskort: milstolpar överst, bilagor underst. */
 function sectionHtml(sec, files) {
   return `
-    <div class="card">
+    <div class="card" data-drop-group="${esc(sec.label)}">
       <div class="card-header">
         <span class="card-title">${esc(sec.label)}</span>
+        <div style="flex:1"></div>
+        ${DROP_HINT}
         ${uploadButton({ group: sec.label })}
       </div>
       <div class="card-body">
@@ -1484,11 +1503,12 @@ function aocSectionHtml(aocs) {
 
 function aocHtml(a) {
   return `
-    <div class="aoc-item" data-aoc-id="${a.id}">
+    <div class="aoc-item" data-aoc-id="${a.id}" data-drop-aoc="${a.id}">
       <div class="aoc-head">
         <input type="text" class="aoc-nr" data-aoc-field="aoc_number"
                value="${esc(a.aoc_number)}" placeholder="AOC-nr, t.ex. NB001">
         <div style="flex:1"></div>
+        ${DROP_HINT}
         ${uploadButton({ aocId: a.id })}
         <button type="button" class="btn-icon" title="Ta bort AOC" data-del-aoc="${a.id}">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
@@ -1590,24 +1610,41 @@ function bindOrderSections(el, id, reload) {
   });
 
   // Uppladdning per avsnitt respektive per AOC
-  el.querySelectorAll('.upload-btn input[type="file"]').forEach(input => {
-    input.addEventListener('change', async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const qs = input.dataset.uploadAoc !== undefined
-        ? `aoc_id=${encodeURIComponent(input.dataset.uploadAoc)}`
-        : `group=${encodeURIComponent(input.dataset.uploadGroup)}`;
+  const uploadTo = async (qs, files) => {
+    let ok = 0;
+    for (const file of files) {
       const fd = new FormData();
       fd.append('file', file);
       try {
         await uploadFile(`/sales/orders/${id}/files?${qs}`, fd);
-        showToast('Fil uppladdad', 'success');
-        reload();
-      } catch (err) {
-        showToast(err.message, 'error');
-        input.value = '';   // annars går samma fil inte att välja igen
-      }
+        ok += 1;
+      } catch (err) { showToast(`${file.name}: ${err.message}`, 'error'); }
+    }
+    if (ok) {
+      showToast(ok > 1 ? `${ok} filer uppladdade` : 'Fil uppladdad', 'success');
+      reload();
+    }
+  };
+
+  el.querySelectorAll('.upload-btn input[type="file"]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const chosen = [...(input.files || [])];
+      if (!chosen.length) return;
+      const qs = input.dataset.uploadAoc !== undefined
+        ? `aoc_id=${encodeURIComponent(input.dataset.uploadAoc)}`
+        : `group=${encodeURIComponent(input.dataset.uploadGroup)}`;
+      input.value = '';   // annars går samma fil inte att välja igen
+      await uploadTo(qs, chosen);
     });
+  });
+
+  // Släpp direkt på avsnittet – filen hamnar i rätt grupp, t.ex. Ritningar
+  // eller Order & betalning, utan att man behöver träffa knappen.
+  el.querySelectorAll('[data-drop-group]').forEach(card => {
+    dropZone(card, (files) => uploadTo(`group=${encodeURIComponent(card.dataset.dropGroup)}`, files));
+  });
+  el.querySelectorAll('[data-drop-aoc]').forEach(block => {
+    dropZone(block, (files) => uploadTo(`aoc_id=${encodeURIComponent(block.dataset.dropAoc)}`, files));
   });
 
   el.querySelectorAll('[data-dl-order-file]').forEach(btn => {

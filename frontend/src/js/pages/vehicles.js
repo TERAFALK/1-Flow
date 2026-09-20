@@ -374,6 +374,29 @@ function axleSvg(r) {
     </svg>`;
 }
 
+/** Utfallsruta för manöverprovet i (EU) 2021/535 bilaga XIII avsnitt D. */
+function euVerdict(res) {
+  const c = res.compliance;
+  if (!c) return '';
+  const mm = x => Math.round(x).toLocaleString('sv-SE') + ' mm';
+  const ok = c.passed;
+  const reason = !c.reachable
+    ? `Fordonet når inte 12,50 m-cirkeln inom max styrvinkel ${c.max_steering_angle}° (minsta R ut ${mm(c.r_out_at_max)}).`
+    : !c.inner_ok
+      ? `R in ${mm(c.r_in)} är mindre än kravets ${mm(c.inner_limit)} – fordonet skär innercirkeln.`
+      : `R ut ${mm(c.r_out)} · R in ${mm(c.r_in)} · utsvängning ${mm(c.swept_width)} (max ${mm(c.max_swept)}).`;
+  return `
+    <div style="border-left:4px solid ${ok ? '#12a150' : '#e5484d'};background:${ok ? '#12a15014' : '#e5484d14'};
+                padding:10px 12px;border-radius:4px;margin-bottom:14px">
+      <div style="font-weight:700;color:${ok ? '#12a150' : '#e5484d'}">
+        ${ok ? 'GODKÄND' : 'EJ GODKÄND'} · manöverprov (EU) 2021/535 bilaga XIII D
+      </div>
+      <div style="font-size:12px;color:var(--text-2);margin-top:3px">${reason}</div>
+      ${res.max_steering_assumed ? `<div style="font-size:12px;color:#e5484d;margin-top:3px">
+        Max styrvinkel saknas – beräknat med antagna ${c.max_steering_angle}°. Fyll i chassileverantörens värde.</div>` : ''}
+    </div>`;
+}
+
 function loadTurning(v) {
   const body = document.getElementById('turn-body');
   const angleInput = document.getElementById('turn-angle');
@@ -390,6 +413,7 @@ function loadTurning(v) {
       return;
     }
     body.innerHTML = `
+      ${euVerdict(res)}
       <div style="display:grid;grid-template-columns:200px 1fr;gap:20px;align-items:start">
         <div>
           ${turnStat('Ytterradie R ut', res.r_out, 'var(--accent)')}

@@ -64,13 +64,25 @@ def _arc(r: float, a0: float, a1: float, n: int = 72) -> List[Point]:
     ]
 
 
-def compute(
-    dims: TruckDims,
-    steering_angle_deg: float,
-    sweep_deg: float = 45.0,
-    ghost_deg: float = 8.0,
-    arc_span_deg: Tuple[float, float] = (4.0, 90.0),
-) -> TurningResult:
+@dataclass
+class _Geom:
+    """Kärngeometrin vid en given styrvinkel – radier utan ritpolygoner."""
+    axles: List[Axle]
+    width: float
+    u_c: float          # fasta axlarnas centrum (vändcentrums referenslinje)
+    u_s: float          # främre styrande axeln
+    l_eff: float        # effektiv hjulbas
+    r_center: float     # R – radie till centrumlinjen vid u_c
+    r_out: float
+    r_in: float
+    r_front: float
+    u_front: float
+    u_end: float
+
+
+def _geometry(dims: TruckDims, steering_angle_deg: float) -> _Geom:
+    """Radierna för en styrvinkel. Delas av compute() och av EU-manöverprovet,
+    som söker den styrvinkel där ytterradien möter 12,50 m-cirkeln."""
     axles = sorted(dims.axles, key=lambda a: a.offset)
     W = dims.width
     fo, ro = dims.front_overhang, dims.rear_overhang
@@ -86,21 +98,34 @@ def compute(
     u_c = sum(a.offset for a in ref_group) / len(ref_group)
     primary = min(steered, key=lambda a: a.offset) if steered else axles[0]
     u_s = primary.offset
-    L_eff = u_c - u_s
-    if L_eff <= 0:
+    l_eff = u_c - u_s
+    if l_eff <= 0:
         raise ValueError("Den styrande axeln måste ligga framför de fasta axlarna")
 
-    d = math.radians(steering_angle_deg)
-    R = L_eff / math.tan(d)                      # radie till centrumlinjen vid u_c
+    R = l_eff / math.tan(math.radians(steering_angle_deg))
     u_front, u_end = -fo, axles[-1].offset + ro
-
-    def dist(u, y):
-        return math.hypot(u - u_c, R - y)
-
     corners = [(u_front, W / 2), (u_front, -W / 2), (u_end, -W / 2), (u_end, W / 2)]
-    r_out = max(dist(u, y) for u, y in corners)
-    r_in = R - W / 2
-    r_front = math.hypot(u_s - u_c, R)           # = L_eff / sin(d)
+    return _Geom(
+        axles=axles, width=W, u_c=u_c, u_s=u_s, l_eff=l_eff, r_center=R,
+        r_out=max(math.hypot(u - u_c, R - y) for u, y in corners),
+        r_in=R - W / 2,
+        r_front=math.hypot(u_s - u_c, R),        # = l_eff / sin(δ)
+        u_front=u_front, u_end=u_end,
+    )
+
+
+def compute(
+    dims: TruckDims,
+    steering_angle_deg: float,
+    sweep_deg: float = 45.0,
+    ghost_deg: float = 8.0,
+    arc_span_deg: Tuple[float, float] = (4.0, 90.0),
+) -> TurningResult:
+    g = _geometry(dims, steering_angle_deg)
+    axles, W = g.axles, g.width
+    u_c, R = g.u_c, g.r_center
+    u_front, u_end = g.u_front, g.u_end
+    r_out, r_in, r_front = g.r_out, g.r_in, g.r_front
     swept = r_out - r_in
 
     # --- Transform: kroppspunkt (u bakåt+, y sidled+) → världskoord vid svängvinkel phi ---
@@ -154,6 +179,102 @@ def compute(
         wheels=wheels,
         axle_angles=axle_angles,
     )
+
+
+# ── Manöverprov enligt (EU) 2021/535 bilaga XIII avsnitt D ────────────────────
+#
+# Fordonet ska kunna manövreras inom en cirkelring som begränsas av två
+# koncentriska cirklar: ytterradie 12,50 m och innerradie 5,30 m. Provet körs
+# med fordonets yttersta punkt längs ytterkretsen – ingen del får då nå innanför
+# innercirkeln. Skillnaden R_ut − R_in är fordonets utsvängning (svepbredd) och
+# får alltså inte överstiga 7,20 m.
+
+EU_OUTER_RADIUS = 12500.0
+EU_INNER_RADIUS = 5300.0
+EU_MAX_SWEPT = EU_OUTER_RADIUS - EU_INNER_RADIUS      # 7 200 mm
+EU_STANDARD = "(EU) 2021/535 bilaga XIII avsnitt D"
+
+# Antas när fordonet saknar registrerad max styrvinkel. Utfallet beror helt på
+# detta värde, så ritningen måste flagga att det är ett antagande.
+DEFAULT_MAX_STEERING = 45.0
+
+
+@dataclass
+class Compliance:
+    standard: str
+    outer_limit: float
+    inner_limit: float
+    max_swept: float
+    max_steering_angle: float
+    angle: Optional[float]        # styrvinkel där R_ut = 12,50 m
+    reachable: bool               # klarar fordonet att hålla sig innanför ytterkretsen
+    r_out: float
+    r_in: float
+    swept_width: float
+    outer_ok: bool
+    inner_ok: bool
+    passed: bool
+    r_out_at_max: float           # minsta uppnåeliga ytterradie (fullt styrutslag)
+    r_in_at_max: float
+    swept_at_max: float
+    l_eff: float                  # effektiv hjulbas i provet
+    r_center: float               # radie till centrumlinjen vid fasta axlarnas centrum
+
+    def to_dict(self):
+        return asdict(self)
+
+
+def angle_for_r_out(dims: TruckDims, target_r_out: float,
+                    max_angle: float = 45.0) -> Optional[float]:
+    """Styrvinkeln där ytterradien blir ``target_r_out``.
+
+    R_ut avtar monotont med styrvinkeln, så intervallet halveras. Returnerar
+    None om radien inte kan nås inom ``max_angle`` (fordonet svänger för brett)."""
+    lo, hi = 0.05, max_angle
+    if _geometry(dims, hi).r_out > target_r_out:
+        return None
+    for _ in range(48):
+        mid = (lo + hi) / 2
+        if _geometry(dims, mid).r_out > target_r_out:
+            lo = mid
+        else:
+            hi = mid
+    return round(hi, 2)
+
+
+def check_eu(dims: TruckDims, max_steering_angle: float = 45.0) -> Compliance:
+    """Kör manöverprovet och returnerar utfallet med alla mellanvärden."""
+    g_max = _geometry(dims, max_steering_angle)
+    angle = angle_for_r_out(dims, EU_OUTER_RADIUS, max_angle=max_steering_angle)
+    reachable = angle is not None
+    g = _geometry(dims, angle) if reachable else g_max
+    inner_ok = reachable and g.r_in >= EU_INNER_RADIUS
+    return Compliance(
+        standard=EU_STANDARD,
+        outer_limit=EU_OUTER_RADIUS,
+        inner_limit=EU_INNER_RADIUS,
+        max_swept=EU_MAX_SWEPT,
+        max_steering_angle=max_steering_angle,
+        angle=angle,
+        reachable=reachable,
+        r_out=round(g.r_out, 1),
+        r_in=round(g.r_in, 1),
+        swept_width=round(g.r_out - g.r_in, 1),
+        outer_ok=reachable,
+        inner_ok=inner_ok,
+        passed=bool(reachable and inner_ok),
+        r_out_at_max=round(g_max.r_out, 1),
+        r_in_at_max=round(g_max.r_in, 1),
+        swept_at_max=round(g_max.r_out - g_max.r_in, 1),
+        l_eff=round(g.l_eff, 1),
+        r_center=round(g.r_center, 1),
+    )
+
+
+def reference_arc(radius: float, arc_span_deg: Tuple[float, float] = (4.0, 90.0),
+                  n: int = 96) -> List[Point]:
+    """Referenscirkelbåge (12,50 m / 5,30 m) i svepets koordinatsystem."""
+    return _arc(radius, math.radians(arc_span_deg[0]), math.radians(arc_span_deg[1]), n)
 
 
 def dims_from_vehicle(v) -> Optional[TruckDims]:
